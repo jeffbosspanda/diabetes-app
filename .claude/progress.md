@@ -100,6 +100,18 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `src/components/Settings.jsx`：加「常見問題 Q&A」卡片（7 題 `<details>` 摺疊：血糖來源/LibreLinkUp/劑量準確度/ICR-ISF/推播/出生日/資料安全）。
 - `src/App.css`：`.qa-*` 樣式。
 
+### 多帳號資料隔離 bug 修正（重要）
+症狀：同一瀏覽器註冊新帳號，卻看到舊帳號資料。
+根因（**非 DB／RLS**，純前端 `src/store/AppContext.jsx`）：
+1. localStorage 是整台瀏覽器共用，舊的 `LOAD` 用未命名 key `diabetesApp` 存舊帳號資料；新帳號（雲端無 row）登入時「遷移」這份本機資料上傳到新帳號 → 汙染。
+2. 切帳號時若新帳號無雲端資料，從不 dispatch `LOAD_STATE`，reducer 仍留舊帳號 state。
+修法：
+- reducer 加 `RESET_STATE` → 回 `initialState`。
+- cache key 依 user 命名：`cacheKeyFor(user)` = `diabetesApp::<user.id>`（未登入才用 legacy key）。
+- `load()`：先 `RESET_STATE`；雲端為來源；無雲端時只還原**本帳號 namespaced cache**，**移除跨帳號遷移 legacy key**。
+- save 寫入 `cacheKeyFor(user)`。
+踩坑：**已被汙染的測試帳號雲端 row 仍有舊資料**，需登入該測試帳號後「設定→清除全部資料」或於 Supabase 刪該 row／帳號。原帳號雲端資料安全。RLS 本就以 user_id 隔離，無需改 schema。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）

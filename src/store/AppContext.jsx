@@ -51,11 +51,19 @@ function reducer(state, action) {
     case 'UPDATE_ICR_ISF': return { ...state, icr: action.payload.icr, isf: action.payload.isf };
     case 'SET_DATA_FLAGS': return { ...state, dataInsufficiencyFlags: action.payload };
     case 'LOAD_STATE': return { ...state, ...action.payload };
+    // Full reset to a clean slate — used when switching accounts so one user's
+    // in-memory data never bleeds into the next.
+    case 'RESET_STATE': return initialState;
     default: return state;
   }
 }
 
+// Legacy un-namespaced key (pre-multi-account / local-only dev).
 const LOCAL_KEY = 'diabetesApp';
+// Per-user cache key. localStorage is shared across ALL accounts on a device, so
+// the cache MUST be namespaced by user id — otherwise account B reads account A's
+// cached data. Returns the legacy key only for the unauthenticated/local path.
+const cacheKeyFor = (user) => (user ? `${LOCAL_KEY}::${user.id}` : LOCAL_KEY);
 
 // Strip non-persistent / transient fields before saving
 function serialize(state) {
@@ -75,7 +83,11 @@ export function AppProvider({ children }) {
     setLoaded(false);
 
     async function load() {
-      // No auth backend → fall back to local-only (dev / unconfigured)
+      // Always start from a clean slate so the previous account's in-memory
+      // state can't leak into this one.
+      dispatch({ type: 'RESET_STATE' });
+
+      // No auth backend → local-only (dev / unconfigured): use the legacy key.
       if (!supabaseReady || !user) {
         try {
           const saved = localStorage.getItem(LOCAL_KEY);
@@ -100,29 +112,16 @@ export function AppProvider({ children }) {
       }
 
       if (data?.data) {
-        // Existing cloud data → source of truth
+        // Existing cloud data → source of truth.
         dispatch({ type: 'LOAD_STATE', payload: data.data });
       } else {
-        // No cloud row yet → migrate this device's localStorage on first login
-        let migrated = null;
+        // No cloud row yet. Restore ONLY this user's own namespaced cache (offline
+        // edits made before a sync). We intentionally do NOT migrate the legacy
+        // shared key here — it may belong to a different account on this device.
         try {
-          const saved = localStorage.getItem(LOCAL_KEY);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.profile || parsed.glucoseReadings?.length || parsed.meals?.length) {
-              migrated = parsed;
-            }
-          }
+          const saved = localStorage.getItem(cacheKeyFor(user));
+          if (saved) dispatch({ type: 'LOAD_STATE', payload: JSON.parse(saved) });
         } catch { /* ignore */ }
-
-        if (migrated) {
-          dispatch({ type: 'LOAD_STATE', payload: migrated });
-          await supabase.from('app_state').upsert({
-            user_id: user.id,
-            data: serialize({ ...initialState, ...migrated }),
-            updated_at: new Date().toISOString(),
-          });
-        }
       }
       setLoaded(true);
     }
@@ -135,8 +134,9 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!loaded) return; // don't overwrite before initial load completes
 
-    // Always keep a local cache for fast reload / offline
-    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(serialize(state))); } catch { /* ignore */ }
+    // Keep a local cache for fast reload / offline — namespaced per user so
+    // accounts on the same device never share a cache.
+    try { localStorage.setItem(cacheKeyFor(user), JSON.stringify(serialize(state))); } catch { /* ignore */ }
 
     if (!supabaseReady || !user) return;
 
