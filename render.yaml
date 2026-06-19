@@ -1,0 +1,17 @@
+# Render Blueprint — DiaGuide
+# 一鍵部署：到 Render 連 GitHub repo，Render 會自動讀此檔建立服務。
+services:
+  - type: web
+    name: diaguide
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/libre/health
+    envVars:
+      # 在 Render Dashboard 手動填入，勿寫進此檔（避免外洩）
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # 食物辨識端點的共用通關金鑰（自訂一組長字串）
+      - key: ACCESS_KEY
+        sync: false

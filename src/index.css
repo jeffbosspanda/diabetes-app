@@ -1,0 +1,20 @@
+:root {
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+  font-family: var(--sans);
+  /* Force light UI controls — the Calm Health Tech theme is a light theme */
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body { margin: 0; }
+
+#root {
+  width: 100%;
+  min-height: 100svh;
+}
+
+/* Headings inherit theme text colour from App.css; no forced colour here */
+h1, h2, h3, h4 { font-family: var(--sans); }
+p { margin: 0; }
