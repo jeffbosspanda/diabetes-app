@@ -169,10 +169,21 @@ async function libre_read(session) {
     isLow: r.isLow,
   });
 
-  const current = connection?.glucoseMeasurement ? mapReading(connection.glucoseMeasurement) : null;
+  const gm = connection?.glucoseMeasurement;
+  const current = gm ? mapReading(gm) : null;
   const history = (graphData || []).map(mapReading);
 
-  return { current, history };
+  // Temporary diagnostic: surface the raw LibreLink timestamps of the current
+  // reading so we can verify timezone handling end-to-end.
+  const debug = gm ? {
+    FactoryTimestamp: gm.FactoryTimestamp,
+    Timestamp: gm.Timestamp,
+    parsedISO: current?.timestamp,
+    serverNowISO: new Date().toISOString(),
+    serverTZ: process.env.TZ || 'unset',
+  } : null;
+
+  return { current, history, debug };
 }
 
 // Session cache: key → { token, accountId, baseURL, expiresAt }
@@ -196,10 +207,10 @@ app.post('/api/libre/sync', async (req, res) => {
 
   try {
     const session = await getSession(username, password);
-    const { current, history } = await libre_read(session);
+    const { current, history, debug } = await libre_read(session);
 
     const readings = [current, ...history].filter(Boolean);
-    res.json({ readings, count: readings.length });
+    res.json({ readings, count: readings.length, debug });
   } catch (err) {
     console.error('[LibreProxy] ERROR:', err.message);
     // Invalidate cached session on error
