@@ -72,8 +72,11 @@ async function libreFetch(url, opts) {
   if (res.status === 429) {
     const retryAfter = parseInt(res.headers.get('retry-after') || '30', 10);
     const waitMs = Math.min(Math.max(retryAfter, 5), 35) * 1000;
-    console.warn(`[LibreProxy] 429 rate-limited, 等 ${waitMs / 1000}s 後重試 ${url}`);
-    await sleep(waitMs);
+    // cap the in-request wait so the HTTP call doesn't hang for 30s; stale-cache
+    // serving (below) is what really absorbs rate limits.
+    const cappedMs = Math.min(waitMs, 6000);
+    console.warn(`[LibreProxy] 429 rate-limited, 等 ${cappedMs / 1000}s 後重試一次 ${url}`);
+    await sleep(cappedMs);
     res = await fetch(url, opts);
   }
   return res;
@@ -201,22 +204,49 @@ async function getSession(username, password) {
   return session;
 }
 
+// Per-account read cache. LibreView rate-limits the shared datacenter IP hard,
+// so we (a) serve a fresh cache within TTL without hitting LibreView at all,
+// and (b) on any fetch error (429 etc.) fall back to the last good data so the
+// user keeps seeing readings instead of an error.
+const readCache = new Map(); // username -> { data, fetchedAt }
+const READ_TTL = 60 * 1000;        // skip refetch within 60s
+const STALE_MAX = 30 * 60 * 1000;  // serve stale up to 30min on error
+
 app.post('/api/libre/sync', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '需要帳號密碼' });
+
+  const cached = readCache.get(username);
+  if (cached && Date.now() - cached.fetchedAt < READ_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
 
   try {
     const session = await getSession(username, password);
     const { current, history, debug } = await libre_read(session);
 
     const readings = [current, ...history].filter(Boolean);
-    res.json({ readings, count: readings.length, debug });
+    const data = { readings, count: readings.length, debug };
+    readCache.set(username, { data, fetchedAt: Date.now() });
+    res.json(data);
   } catch (err) {
     console.error('[LibreProxy] ERROR:', err.message);
-    // Invalidate cached session on error
+    // Wrong credentials → no point serving stale; surface immediately.
+    if (err.message.includes('帳號或密碼')) {
+      sessions.delete(`${username}::${password}`);
+      return res.status(401).json({ error: err.message });
+    }
+    // Rate-limited / transient → serve last good data if we have it.
+    const stale = readCache.get(username);
+    if (stale && Date.now() - stale.fetchedAt < STALE_MAX) {
+      console.warn('[LibreProxy] 回傳快取 (limit/錯誤)');
+      return res.json({ ...stale.data, stale: true });
+    }
     sessions.delete(`${username}::${password}`);
-    const status = err.message.includes('帳號或密碼') ? 401 : 502;
-    res.status(status).json({ error: err.message });
+    const friendly = /429|rate.?limit|1015/i.test(err.message)
+      ? 'LibreView 暫時限流（雲端 IP），請稍等 1–2 分鐘再同步'
+      : err.message;
+    res.status(502).json({ error: friendly });
   }
 });
 
