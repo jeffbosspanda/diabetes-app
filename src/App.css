@@ -1217,6 +1217,7 @@ textarea { resize: vertical; }
 .bgp-predict-label { font-size: 10px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.02em; }
 .bgp-predict-val   { font-size: 22px; font-weight: 800; line-height: 1; }
 .bgp-predict-unit  { font-size: 11px; font-weight: 400; }
+.bgp-predict-cat   { font-size: 18px; font-weight: 800; line-height: 1; }
 .bgp-val-ok   { color: var(--green); }
 .bgp-val-high { color: #f59e0b; }
 .bgp-val-low  { color: #ef4444; }
@@ -1595,6 +1596,11 @@ textarea { resize: vertical; }
 }
 .glycemic-note { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
 .tag-glycemic { color: #fff; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.food-glycemic-list { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+.fg-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.fg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fg-name { color: var(--text-secondary); }
+.fg-label { margin-left: auto; font-weight: 700; font-size: 11px; }
 
 /* ── Menstrual cycle card ── */
 .cycle-card { border-left: 4px solid var(--accent, #863bff); }

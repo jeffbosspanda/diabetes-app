@@ -65,8 +65,8 @@ function extractQtyAndFood(token) {
   return { qty: parseQty(rawQty) || 1, foodText: rest || token };
 }
 
-// Returns per-food breakdown for carb-weighted BG impact analysis.
-// Each entry: { name, carbs, protein, fat }
+// Returns per-food breakdown for carb-weighted BG impact / glycemic analysis.
+// Each entry: { name, carbs, protein, fat, gi }
 export function parseMealFoods(text) {
   if (!text?.trim()) return [];
   const tokens = tokenize(text);
@@ -83,6 +83,7 @@ export function parseMealFoods(text) {
           carbs:   Math.round(food.carbs   * scale * 10) / 10,
           protein: Math.round(food.protein * scale * 10) / 10,
           fat:     Math.round(food.fat     * scale * 10) / 10,
+          gi:      food.gi ?? null,
         });
       }
       continue;
@@ -95,6 +96,7 @@ export function parseMealFoods(text) {
         carbs:   Math.round(food.carbs   * qty * 10) / 10,
         protein: Math.round(food.protein * qty * 10) / 10,
         fat:     Math.round(food.fat     * qty * 10) / 10,
+        gi:      food.gi ?? null,
       });
     }
   }

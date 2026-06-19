@@ -2,8 +2,8 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, subDays } from 'date-fns';
-import { parseMealText } from '../utils/foodParser';
-import { classifyGlycemicResponse, classifyMeal } from '../utils/glycemicResponse';
+import { parseMealText, parseMealFoods } from '../utils/foodParser';
+import { classifyGlycemicResponse, classifyMeal, classifyFood } from '../utils/glycemicResponse';
 import ConfirmDialog from './ConfirmDialog';
 import { calcDietaryNeeds, analyzeDailyIntake, getDietaryTips, buildNutrientAdvice, mealNutrientFeedback, VEG_TYPES } from '../utils/dietaryAdvisor';
 import NutrientImpactRanking from './NutrientImpactRanking';
@@ -325,9 +325,24 @@ export default function MealLog() {
               )}
               {(() => {
                 const g = classifyGlycemicResponse(analysis);
+                const perFood = parseMealFoods(form.foods || '').filter(f => (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
                 return (
                   <div className="glycemic-box" style={{ borderColor: g.color }}>
-                    <span className="glycemic-badge" style={{ background: g.color }}>{g.emoji} {g.label}</span>
+                    <span className="glycemic-badge" style={{ background: g.color }}>整餐：{g.emoji} {g.label}</span>
+                    {perFood.length > 0 && (
+                      <div className="food-glycemic-list" style={{ marginTop: 2 }}>
+                        {perFood.map((f, j) => {
+                          const fg = classifyFood(f);
+                          return (
+                            <div key={j} className="fg-row">
+                              <span className="fg-dot" style={{ background: fg.color }} />
+                              <span className="fg-name">{f.name}</span>
+                              <span className="fg-label" style={{ color: fg.color }}>{fg.emoji} {fg.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     <span className="glycemic-note">{g.note}</span>
                   </div>
                 );
@@ -545,6 +560,24 @@ export default function MealLog() {
                   {m.exerciseBefore && <span className="tag-green">餐前運動</span>}
                   {m.exerciseAfter  && <span className="tag-blue">餐後運動</span>}
                 </div>
+                {(() => {
+                  const perFood = parseMealFoods(m.foods || '').filter(f => (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
+                  if (perFood.length < 1) return null;
+                  return (
+                    <div className="food-glycemic-list">
+                      {perFood.map((f, j) => {
+                        const g = classifyFood(f);
+                        return (
+                          <div key={j} className="fg-row">
+                            <span className="fg-dot" style={{ background: g.color }} />
+                            <span className="fg-name">{f.name}</span>
+                            <span className="fg-label" style={{ color: g.color }}>{g.emoji} {g.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
                 {fb.good.length > 0 && (
                   <div className="meal-feedback meal-feedback-good">✅ 補充了 {fb.good.join('、')}</div>
                 )}

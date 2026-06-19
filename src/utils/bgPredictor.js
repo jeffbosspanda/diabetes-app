@@ -85,22 +85,31 @@ function trendArrow(slope) {
   return               { arrow: '↓↓', label: '快速下降', dir: 'down' };
 }
 
+// ── Predicted-range category ────────────────────────────────────────────────
+// The point prediction is inherently imprecise, so we surface a RANGE category
+// instead of a single number.
+export function bgCategory(v) {
+  if (v < 70)   return { key: 'low',        label: '低血糖',   color: '#ef4444', level: 'danger' };
+  if (v < 90)   return { key: 'lowNormal',  label: '正常偏低', color: '#f59e0b', level: 'warn'   };
+  if (v <= 140) return { key: 'normal',     label: '正常',     color: '#22c55e', level: 'ok'     };
+  if (v <= 180) return { key: 'highNormal', label: '正常偏高', color: '#f59e0b', level: 'warn'   };
+  return            { key: 'high',       label: '高血糖',   color: '#ef4444', level: 'high'   };
+}
+
 // ── Warning ───────────────────────────────────────────────────────────────────
+// Worded by trend/category — never a precise predicted number.
 function buildWarning(current, predicted, slope) {
   if (predicted < 70) {
     const minsTo = slope < 0 ? Math.round((current - 70) / (-slope)) : null;
     return {
       level: 'danger',
       msg: minsTo != null && minsTo < 30
-        ? `⚠ 約 ${minsTo} 分鐘後可能低血糖（< 70 mg/dL），建議立即補充 15g 快速碳水`
-        : `⚠ 預測 30 分鐘後低血糖（${predicted} mg/dL），建議補充 15g 碳水`,
+        ? `⚠ 約 ${minsTo} 分鐘後可能低血糖，建議立即補充 15g 快速碳水`
+        : '⚠ 趨勢偏向低血糖，建議準備補充 15g 碳水',
     };
   }
   if (predicted > 180) {
-    return {
-      level: 'high',
-      msg: `⚠ 預測 30 分鐘後高血糖（${predicted} mg/dL），注意飲食或確認是否需補充胰島素`,
-    };
+    return { level: 'high', msg: '⚠ 趨勢偏向高血糖，注意飲食或確認是否需補充胰島素' };
   }
   if (predicted > 160 && slope >= 1) {
     return { level: 'warn', msg: '血糖持續快速上升，建議密切觀察' };
@@ -202,6 +211,7 @@ export function predictBG30(glucoseReadings, meals = [], insulinLogs = [], icr =
     status:        'ok',
     current:       latest.v,
     predicted,
+    predictedCategory: bgCategory(predicted),
     slope:         Math.round(slope * 10) / 10,
     arrow,
     trendLabel:    label,

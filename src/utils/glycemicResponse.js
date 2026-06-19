@@ -55,3 +55,14 @@ export function classifyMeal(meal) {
     highGICount: meal.highGI?.length ?? 0,
   });
 }
+
+// Classify a single food item from parseMealFoods ({ carbs, protein, fat, gi }).
+export function classifyFood(food) {
+  if (!food) return null;
+  return classifyGlycemicResponse({
+    carbs: food.carbs ?? 0,
+    protein: food.protein ?? 0,
+    fat: food.fat ?? 0,
+    highGICount: (food.gi ?? 0) >= 70 ? 1 : 0,
+  });
+}

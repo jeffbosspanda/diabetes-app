@@ -143,6 +143,24 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - UI 標示：`MealLog`（分析卡 glycemic-box + 紀錄列 tag）、`InsulinAdvisor`（食物分析卡）、`Dashboard`（預測 activeMeals chip 附型態）。
 - `src/App.css`：`.glycemic-*`、`.tag-glycemic`。
 
+### 血糖預測改顯示分級（不顯示精確數值）
+- `src/utils/bgPredictor.js`：加 `bgCategory(v)` → 低血糖(<70)/正常偏低(<90)/正常(≤140)/正常偏高(≤180)/高血糖；回傳 `predictedCategory`；警語改用趨勢/分級用語，不再寫精確 mg/dL。
+- `src/components/Dashboard.jsx`：30 分預測顯示分級文字（`bgp-predict-cat`）取代數字；因素拆解改定性 `influence()`（影響小／↑↓中等／明顯），移除精確 mg/dL。
+- `src/App.css`：`.bgp-predict-cat`。
+- 理由：點預測本質不精確，改用區間分級避免假精確。`predicted` 數值仍內部保留供警語門檻判斷。
+
+### 逐項食物升糖分類（每筆飲食紀錄）
+- `src/utils/foodParser.js` `parseMealFoods()`：每項食物加回 `gi`。
+- `src/utils/glycemicResponse.js`：加 `classifyFood(food)`（單品，gi≥70 視為高GI）。
+- `src/components/MealLog.jsx`：每筆飲食紀錄列出**逐項食物**的升糖型態（白飯快速／雞腿高脂高蛋白延遲／青菜低升糖…）；新增分析卡同時顯示「整餐」+「逐項」。
+- `src/App.css`：`.food-glycemic-list`、`.fg-*`。
+- 註：靠本機 foodDatabase 比對；未識別或手動輸入餐點則只顯示整餐分類。
+
+### 餐後第二波升糖分析
+- `src/utils/secondWave.js`（新）：`analyzeSecondWave(meals,glucose,insulin,{days})`。每餐取餐前基準、前段(0–2h)峰、2h 值、2–5h 峰與中間谷；判定第二波＝2h 後再升 ≥25 且峰 ≥160 且（有谷時）較谷高 ≥25 且峰在 130min 後。產出原因（高脂高蛋白延遲消化／餐前胰島素藥效已退／無餐前胰島素）與建議（分次注射、餐後 2–3h 補打校正）。回傳 summary（count/examined/pct）。
+- `src/components/GlucoseLog.jsx`：加「餐後第二波升糖分析」卡（預設 3 筆 + 顯示更多），days 依所選範圍推算。
+- 單測：早峰140→2h回落120→第二波175@210min → 正確判定。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）

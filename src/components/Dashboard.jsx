@@ -34,6 +34,15 @@ const BG_COLOR    = '#0e9488'; // BG line → teal (high contrast on warm-white)
 const MEAL_COLORS = { breakfast: MEAL_COLOR, lunch: MEAL_COLOR, dinner: MEAL_COLOR, lateSnack: MEAL_COLOR, snack: MEAL_COLOR };
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', lateSnack: '宵夜', snack: '點心' };
 
+// Qualitative influence label — direction + coarse magnitude (no precise number,
+// since the underlying estimate isn't precise enough to show as mg/dL).
+function influence(n) {
+  const a = Math.abs(n);
+  if (a < 3) return '影響小';
+  const word = a < 12 ? '中等' : '明顯';
+  return n > 0 ? `↑ ${word}` : `↓ ${word}`;
+}
+
 // ── Custom BG dot: red if low, amber if high, BG colour otherwise ───────────
 function BGDot(props) {
   const { cx, cy, payload } = props;
@@ -312,36 +321,30 @@ export default function Dashboard() {
             </div>
             <div className="bgp-predict">
               <span className="bgp-predict-label">30 分後預測</span>
-              <span className={`bgp-predict-val ${
-                bgPrediction.predicted < 70 ? 'bgp-val-low'
-                : bgPrediction.predicted > 180 ? 'bgp-val-high'
-                : 'bgp-val-ok'
-              }`}>
-                {bgPrediction.predicted}
-                <span className="bgp-predict-unit"> mg/dL</span>
+              <span className="bgp-predict-cat" style={{ color: bgPrediction.predictedCategory.color }}>
+                {bgPrediction.predictedCategory.label}
               </span>
             </div>
           </div>
 
-          {/* Contribution breakdown */}
+          {/* Contribution breakdown — qualitative direction (avoids false precision) */}
           <div className="bgp-breakdown">
             <span className="bgp-bk-item">
               <span className="bgp-bk-dot bgp-bk-trend" />
-              趨勢 {bgPrediction.trendContrib > 0 ? '+' : ''}{bgPrediction.trendContrib}
+              趨勢 {influence(bgPrediction.trendContrib)}
             </span>
             {bgPrediction.mealContrib !== 0 && (
               <span className="bgp-bk-item">
                 <span className="bgp-bk-dot bgp-bk-meal" />
-                飲食 {bgPrediction.mealContrib > 0 ? '+' : ''}{bgPrediction.mealContrib}
+                飲食 {influence(bgPrediction.mealContrib)}
               </span>
             )}
             {bgPrediction.insulinContrib !== 0 && (
               <span className="bgp-bk-item">
                 <span className="bgp-bk-dot bgp-bk-insulin" />
-                胰島素 {bgPrediction.insulinContrib > 0 ? '+' : ''}{bgPrediction.insulinContrib}
+                胰島素 {influence(bgPrediction.insulinContrib)}
               </span>
             )}
-            <span className="bgp-bk-unit">mg/dL</span>
           </div>
 
           {/* Active context chips */}

@@ -3,6 +3,7 @@ import { useApp } from '../store/AppContext';
 import { Activity, Plus, AlertTriangle, TrendingUp } from 'lucide-react';
 import { getBGStatus, analyzeGlycemicEvents, analyzeGlucoseExcursions } from '../utils/insulinCalculator';
 import { analyzeGlucoseStats } from '../utils/glucoseStats';
+import { analyzeSecondWave } from '../utils/secondWave';
 import { format, subDays } from 'date-fns';
 
 const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90 };
@@ -59,6 +60,14 @@ export default function GlucoseLog() {
     () => analyzeGlucoseExcursions(state.glucoseReadings, state.meals, state.insulinLogs, { from: winLo, to: winHi }),
     [state.glucoseReadings, state.meals, state.insulinLogs, winLo, winHi]
   );
+
+  // 餐後第二波升糖（2–4h 後再度上升）
+  const secondWaveDays = Math.max(1, Math.ceil((Date.now() - winLo) / (24 * 3600 * 1000)));
+  const secondWave = useMemo(
+    () => analyzeSecondWave(state.meals, state.glucoseReadings, state.insulinLogs, { days: secondWaveDays }),
+    [state.meals, state.glucoseReadings, state.insulinLogs, secondWaveDays]
+  );
+  const [showAllSecondWave, setShowAllSecondWave] = useState(false);
 
   return (
     <div className="page">
@@ -347,6 +356,62 @@ export default function GlucoseLog() {
 
           <div className="basal-disclaimer" style={{ marginTop: 8 }}>
             以上為系統自動分析，任何劑量調整請先諮詢醫師或衛教師。
+          </div>
+        </div>
+      )}
+
+      {/* 餐後第二波升糖分析 */}
+      {secondWave.events.length > 0 && (
+        <div className="card event-analysis-card">
+          <div className="ea-header">
+            <TrendingUp size={16} color="var(--accent2)" />
+            <h3>餐後第二波升糖分析</h3>
+            <span className="ea-period">
+              近 {secondWave.summary.days} 天 · {secondWave.summary.count}/{secondWave.summary.examined} 餐
+            </span>
+          </div>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            有些餐點血糖不是餐後立刻上升，而是 2–4 小時後出現第二波（常見於高脂高蛋白餐）。系統從實際血糖偵測這類延遲升糖，僅供參考。
+          </p>
+
+          {(showAllSecondWave ? secondWave.events : secondWave.events.slice(0, PREVIEW_N)).map((ev, i) => (
+            <div key={i} className="ea-event ea-hyper">
+              <div className="ea-event-top">
+                <span className="ea-badge ea-badge-high">
+                  第二波 +{ev.rise2} mg/dL（峰值 {ev.latePeak}）
+                </span>
+                <span className="ea-time">{format(new Date(ev.timestamp), 'MM/dd HH:mm')}</span>
+                <span className="ea-dur">餐後 {ev.latePeakMin} 分鐘達峰 · {ev.glycemicLabel}</span>
+              </div>
+              {ev.foods && <div className="ea-context">餐點：{ev.foods.slice(0, 28)}{ev.foods.length > 28 ? '…' : ''}</div>}
+              <div className="ea-context">
+                餐前 {ev.baseline}
+                {ev.earlyPeak != null && ` · 前段峰 ${ev.earlyPeak}（${ev.earlyPeakMin}分）`}
+                {ev.troughBG != null && ` · 回落 ${ev.troughBG}`}
+                {` · 第二波峰 ${ev.latePeak}（${ev.latePeakMin}分）`}
+              </div>
+              <div className="ea-causes">
+                {ev.causes.map((c, j) => (
+                  <div key={j} className="ea-cause"><span className="ea-cause-detail">{c}</span></div>
+                ))}
+              </div>
+              {ev.suggestions.length > 0 && (
+                <div className="ea-suggestions">
+                  {ev.suggestions.map((sg, j) => <div key={j} className="ea-suggestion">💡 {sg}</div>)}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {secondWave.events.length > PREVIEW_N && (
+            <button className="btn-secondary full-width" style={{ marginTop: 4 }}
+              onClick={() => setShowAllSecondWave(v => !v)}>
+              {showAllSecondWave ? '收合' : `顯示更多（共 ${secondWave.events.length} 筆）`}
+            </button>
+          )}
+
+          <div className="basal-disclaimer" style={{ marginTop: 8 }}>
+            以上為系統自動分析，任何劑量或注射方式調整請先諮詢醫師或衛教師。
           </div>
         </div>
       )}
