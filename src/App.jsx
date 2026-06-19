@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './store/AppContext';
+import { AuthProvider, useAuth } from './store/AuthContext';
+import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import GlucoseLog from './components/GlucoseLog';
@@ -10,7 +12,8 @@ import Reminders from './components/Reminders';
 import Settings from './components/Settings';
 import Achievements from './components/Achievements';
 import { findMealsNeedingInsulin, buildInsulinReminderMessage } from './utils/insulinReminder';
-import { LayoutDashboard, Activity, Utensils, Syringe, Bell, Settings as Gear, X } from 'lucide-react';
+import { LayoutDashboard, Activity, Utensils, Syringe, Bell, Settings as Gear, X, LogOut } from 'lucide-react';
+import { supabaseReady } from './lib/supabase';
 import './App.css';
 
 // App-wide: detect meals lacking an insulin injection and nudge the user
@@ -62,11 +65,17 @@ function InsulinReminderBar() {
 }
 
 function Layout() {
+  const { user, signOut } = useAuth();
   return (
     <div className="app">
       <header className="app-header">
         <div className="logo">💉 DiaGuide</div>
         <span className="logo-sub">糖尿病管理系統</span>
+        {user && (
+          <button className="signout-btn" onClick={signOut} title={`登出 ${user.email}`}>
+            <LogOut size={16} />
+          </button>
+        )}
       </header>
 
       <InsulinReminderBar />
@@ -108,12 +117,30 @@ function Layout() {
   );
 }
 
-export default function App() {
+// Gate: require login before the app loads (when Supabase is configured)
+function Gate() {
+  const { user, loading } = useAuth();
+
+  if (supabaseReady && loading) {
+    return <div className="auth-wrap"><div className="auth-spinner">載入中…</div></div>;
+  }
+  if (supabaseReady && !user) {
+    return <Auth />;
+  }
+
   return (
     <AppProvider>
       <BrowserRouter>
         <Layout />
       </BrowserRouter>
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

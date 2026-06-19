@@ -15,3 +15,9 @@ services:
       # 食物辨識端點的共用通關金鑰（自訂一組長字串）
       - key: ACCESS_KEY
         sync: false
+      # Supabase（登入 + 雲端儲存）。build 時注入前端，故必填。
+      # anon key 可公開（資料靠 RLS 保護）。
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
