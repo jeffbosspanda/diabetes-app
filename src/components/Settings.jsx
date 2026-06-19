@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle } from 'lucide-react';
+import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle, GraduationCap } from 'lucide-react';
 import { INSULIN_BRANDS } from '../utils/insulinCalculator';
 import { openReport } from '../utils/reportGenerator';
 import LibreSync from './LibreSync';
@@ -210,6 +210,17 @@ export default function Settings() {
             <Trash2 size={14} /> 清除全部資料
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <h3><GraduationCap size={16} /> 新手教學</h3>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          一步一步帶你完成基本資料、連接 LibreLink、記錄飲食與血糖，並介紹各區塊功能。
+        </p>
+        <button className="btn-primary full-width"
+          onClick={() => dispatch({ type: 'UPDATE_SETTINGS', payload: { onboardingCompleted: false, onboardingStep: 0 } })}>
+          <GraduationCap size={15} /> 開始 / 重看新手教學
+        </button>
       </div>
 
       <div className="card">

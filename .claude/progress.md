@@ -112,6 +112,17 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - save 寫入 `cacheKeyFor(user)`。
 踩坑：**已被汙染的測試帳號雲端 row 仍有舊資料**，需登入該測試帳號後「設定→清除全部資料」或於 Supabase 刪該 row／帳號。原帳號雲端資料安全。RLS 本就以 user_id 隔離，無需改 schema。
 
+### 登出二次確認
+- `src/App.jsx`：登出鈕改先彈 `ConfirmDialog`（帶帳號 email），確認才 signOut。
+
+### 新手教學改版（不中斷 + 設定入口）
+- `src/components/Onboarding.jsx` 重寫：7 步（歡迎→基本資料→LibreLink→飲食→血糖→劑量→總覽）。
+  - **不中斷**：動作步按「前往◯◯」→ 導頁 + 縮小成浮動「繼續教學（n/總）」pill（不結束教學），操作完點 pill 回到下一步。
+  - 進度持久化於 `settings.onboardingStep`；完成/跳過設 `onboardingCompleted:true`。
+  - 顯示條件：`onboardingCompleted!==true && (新用戶空資料 || onboardingCompleted===false)`。`===false` 為設定頁手動重啟旗標（既有用戶 undefined 不會自動跳）。
+- `src/components/Settings.jsx`：加「新手教學」卡片，按鈕設 `{onboardingCompleted:false, onboardingStep:0}` 重啟（overlay 立即覆蓋當前頁）。
+- `src/App.css`：`.onboard-pill` 浮動鈕樣式。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）

@@ -32,6 +32,15 @@ export default function InsulinAdvisor() {
   // brandType → 對應品牌名稱
   const brandFor = (bt) => (bt === 'long' ? longBrand : bt === 'short' ? shortBrand : rapidBrand);
 
+  // Insulin types the user actually uses — a brand set to「無」is excluded from
+  // the injection-logging UI (tabs + brand bar).
+  const TYPE_META = {
+    rapid: { brand: rapidBrand, label: '速效', emoji: '⚡', tagClass: 'rapid-tag', activeClass: 'active-rapid', Icon: Zap },
+    short: { brand: shortBrand, label: '短效', emoji: '🕒', tagClass: 'short-tag', activeClass: 'active-short', Icon: Clock },
+    long:  { brand: longBrand,  label: '長效', emoji: '🌙', tagClass: 'long-tag',  activeClass: 'active-long',  Icon: Moon },
+  };
+  const availableTypes = ['rapid', 'short', 'long'].filter(t => TYPE_META[t].brand && TYPE_META[t].brand !== '無');
+
   const [form, setForm] = useState({
     mealType: 'lunch',
     exerciseBefore: false, exerciseBeforeType: 'moderate',
@@ -50,6 +59,14 @@ export default function InsulinAdvisor() {
   const [quickSaved, setQuickSaved] = useState(false);
   const setQ = (k, v) => setQuickLog(q => ({ ...q, [k]: v }));
   const set  = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // If the selected injection type is now「無」(unavailable), fall back to the first
+  // available one so the form never points at a brand the user doesn't use.
+  useEffect(() => {
+    if (availableTypes.length && !availableTypes.includes(quickLog.brandType)) {
+      setQ('brandType', availableTypes[0]);
+    }
+  }, [availableTypes, quickLog.brandType]);
 
   // edit / delete state for injection logs
   const [logConfirm, setLogConfirm]   = useState(null); // { index: origIdx }
@@ -725,28 +742,29 @@ export default function InsulinAdvisor() {
       <div className="card">
         <h3><Plus size={14} /> 手動記錄注射</h3>
         <div className="confirmed-brand-bar" style={{ marginBottom: 10 }}>
-          <span className="rapid-tag">⚡ {rapidBrand}</span>
-          <span className="short-tag">🕒 {shortBrand}</span>
-          <span className="long-tag">🌙 {longBrand}</span>
+          {availableTypes.map(t => (
+            <span key={t} className={TYPE_META[t].tagClass}>{TYPE_META[t].emoji} {TYPE_META[t].brand}</span>
+          ))}
           <button className="btn-brand-change" onClick={() => nav('/settings')}>
             <Settings size={11} /> 更換
           </button>
         </div>
 
-        <div className="inject-type-tabs">
-          <button className={`inject-tab ${quickLog.brandType === 'rapid' ? 'active-rapid' : ''}`}
-            onClick={() => setQ('brandType', 'rapid')}>
-            <Zap size={13} /> 速效（{rapidBrand}）
-          </button>
-          <button className={`inject-tab ${quickLog.brandType === 'short' ? 'active-short' : ''}`}
-            onClick={() => setQ('brandType', 'short')}>
-            <Clock size={13} /> 短效（{shortBrand}）
-          </button>
-          <button className={`inject-tab ${quickLog.brandType === 'long' ? 'active-long' : ''}`}
-            onClick={() => setQ('brandType', 'long')}>
-            <Moon size={13} /> 長效（{longBrand}）
-          </button>
-        </div>
+        {availableTypes.length === 0 ? (
+          <p className="hint">尚未設定任何胰島素品牌，請先到「設定」選擇品牌。</p>
+        ) : (
+          <div className="inject-type-tabs">
+            {availableTypes.map(t => {
+              const { label, brand, activeClass, Icon } = TYPE_META[t];
+              return (
+                <button key={t} className={`inject-tab ${quickLog.brandType === t ? activeClass : ''}`}
+                  onClick={() => setQ('brandType', t)}>
+                  <Icon size={13} /> {label}（{brand}）
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="form-grid">
           <div className="form-group">

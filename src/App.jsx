@@ -12,6 +12,7 @@ import Reminders from './components/Reminders';
 import Settings from './components/Settings';
 import Achievements from './components/Achievements';
 import Onboarding from './components/Onboarding';
+import ConfirmDialog from './components/ConfirmDialog';
 import { findMealsNeedingInsulin, buildInsulinReminderMessage } from './utils/insulinReminder';
 import { LayoutDashboard, Activity, Utensils, Syringe, Bell, Settings as Gear, X, LogOut } from 'lucide-react';
 import { supabaseReady } from './lib/supabase';
@@ -67,13 +68,24 @@ function InsulinReminderBar() {
 
 function Layout() {
   const { user, signOut } = useAuth();
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   return (
     <div className="app">
+      {confirmSignOut && (
+        <ConfirmDialog
+          title="確認登出？"
+          message={`將登出帳號 ${user?.email}，需重新登入才能繼續使用。`}
+          confirmLabel="登出"
+          danger
+          onConfirm={() => { setConfirmSignOut(false); signOut(); }}
+          onCancel={() => setConfirmSignOut(false)}
+        />
+      )}
       <header className="app-header">
         <div className="logo">💉 DiaGuide</div>
         <span className="logo-sub">糖尿病管理系統</span>
         {user && (
-          <button className="signout-btn" onClick={signOut} title={`登出 ${user.email}`}>
+          <button className="signout-btn" onClick={() => setConfirmSignOut(true)} title={`登出 ${user.email}`}>
             <LogOut size={16} />
           </button>
         )}
