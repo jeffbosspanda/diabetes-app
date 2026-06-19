@@ -1,0 +1,18 @@
+{
+  "name": "DiaGuide — 糖尿病管理系統",
+  "short_name": "DiaGuide",
+  "description": "血糖、飲食、胰島素管理與高低血糖推播提醒",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#0f0f1a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

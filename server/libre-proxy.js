@@ -6,8 +6,26 @@ import Anthropic from '@anthropic-ai/sdk';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import webpush from 'web-push';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Web Push (VAPID). Configured only when keys are present; generate a pair with
+// `npx web-push generate-vapid-keys` and set them as env vars on Render.
+const PUSH_ENABLED = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:wuborjenn@gmail.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY,
+  );
+}
+
+// Clinical thresholds for glucose alerts (mg/dL), matching the app's TIR 70–180.
+const BG_LOW = 70;
+const BG_HIGH = 180;
+// Don't re-alert the same condition more often than this.
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1h
 
 // Service-role Supabase client for server-side scheduled sync (bypasses RLS).
 // Only created when configured; never expose the service key to the frontend.
@@ -266,6 +284,56 @@ function mergeGlucose(existing = [], incoming = []) {
   return merged.filter(r => new Date(r.timestamp).getTime() >= cutoff);
 }
 
+// Send a push payload to every subscription a user has registered. Returns the
+// surviving subscriptions (dead ones — 404/410 — are pruned).
+async function sendPushToUser(subscriptions = [], payload) {
+  if (!PUSH_ENABLED || !subscriptions.length) return { survivors: subscriptions, sent: 0, changed: false };
+  const survivors = [];
+  let sent = 0;
+  for (const sub of subscriptions) {
+    try {
+      await webpush.sendNotification(sub, JSON.stringify(payload));
+      survivors.push(sub);
+      sent++;
+    } catch (e) {
+      // 404/410 = subscription gone (uninstalled / expired) → drop it.
+      if (e.statusCode === 404 || e.statusCode === 410) {
+        console.warn('[Push] 移除失效訂閱', e.statusCode);
+      } else {
+        console.warn('[Push] 發送失敗:', e.statusCode || e.message);
+        survivors.push(sub); // transient error — keep for next time
+      }
+    }
+  }
+  return { survivors, sent, changed: survivors.length !== subscriptions.length };
+}
+
+// Decide whether the latest reading warrants an alert, honoring a cooldown so we
+// don't spam the same condition. Returns { payload, nextAlert } or null.
+function evalGlucoseAlert(latest, lastAlert) {
+  if (!latest || typeof latest.value !== 'number') return null;
+  const v = latest.value;
+  const level = v < BG_LOW ? 'low' : v > BG_HIGH ? 'high' : 'normal';
+  const now = Date.now();
+
+  // Back in range → clear state so the next out-of-range event alerts immediately.
+  if (level === 'normal') {
+    return lastAlert?.level && lastAlert.level !== 'normal'
+      ? { payload: null, nextAlert: { level: 'normal', at: now } }
+      : null;
+  }
+
+  // Same condition still active and within cooldown → stay quiet.
+  if (lastAlert?.level === level && now - (lastAlert.at || 0) < ALERT_COOLDOWN_MS) {
+    return null;
+  }
+
+  const payload = level === 'low'
+    ? { title: '⚠️ 低血糖警報', body: `目前血糖 ${v} mg/dL（低於 ${BG_LOW}），請盡快補充糖分。`, tag: 'bg-low', url: '/' }
+    : { title: '⚠️ 高血糖警報', body: `目前血糖 ${v} mg/dL（高於 ${BG_HIGH}），請留意並依醫囑處理。`, tag: 'bg-high', url: '/' };
+  return { payload, nextAlert: { level, at: now, value: v } };
+}
+
 async function syncOneUser(row) {
   const data = row.data || {};
   const creds = data.settings?.libreCredentials;
@@ -279,15 +347,32 @@ async function syncOneUser(row) {
   const glucoseReadings = mergeGlucose(data.glucoseReadings, incoming);
   const added = glucoseReadings.length - before;
 
+  // Glucose alert: evaluate the most recent reading and push if out of range.
+  let nextData = { ...data, glucoseReadings };
+  let dirty = added !== 0 || glucoseReadings.length !== before;
+  let pushed = 0;
+
+  const alert = evalGlucoseAlert(current, data.lastGlucoseAlert);
+  if (alert) {
+    if (alert.payload) {
+      const subs = Array.isArray(data.pushSubscriptions) ? data.pushSubscriptions : [];
+      const { survivors, sent, changed } = await sendPushToUser(subs, alert.payload);
+      pushed = sent;
+      if (changed) { nextData.pushSubscriptions = survivors; dirty = true; }
+    }
+    nextData.lastGlucoseAlert = alert.nextAlert;
+    dirty = true;
+  }
+
   // Only write when something changed (avoid needless clobber of client writes).
-  if (added !== 0 || glucoseReadings.length !== before) {
+  if (dirty) {
     const { error } = await supabaseAdmin
       .from('app_state')
-      .update({ data: { ...data, glucoseReadings }, updated_at: new Date().toISOString() })
+      .update({ data: nextData, updated_at: new Date().toISOString() })
       .eq('user_id', row.user_id);
     if (error) throw new Error(error.message);
   }
-  return { added, total: glucoseReadings.length };
+  return { added, total: glucoseReadings.length, pushed };
 }
 
 let cronRunning = false;
@@ -295,7 +380,7 @@ async function syncAllUsers() {
   if (!supabaseAdmin) { console.warn('[Cron] Supabase service role 未設定，略過'); return { error: 'not configured' }; }
   if (cronRunning) { console.warn('[Cron] 上一輪仍在執行，略過'); return { busy: true }; }
   cronRunning = true;
-  const summary = { users: 0, synced: 0, added: 0, errors: [] };
+  const summary = { users: 0, synced: 0, added: 0, pushed: 0, errors: [] };
   try {
     const { data: rows, error } = await supabaseAdmin.from('app_state').select('user_id, data');
     if (error) throw new Error(error.message);
@@ -303,7 +388,7 @@ async function syncAllUsers() {
     for (const row of rows) {
       try {
         const r = await syncOneUser(row);
-        if (!r.skipped) { summary.synced++; summary.added += r.added || 0; }
+        if (!r.skipped) { summary.synced++; summary.added += r.added || 0; summary.pushed += r.pushed || 0; }
       } catch (e) {
         summary.errors.push(`${row.user_id.slice(0, 8)}: ${e.message}`);
       }
@@ -329,6 +414,90 @@ app.all('/api/cron/sync-all', async (req, res) => {
   }
   const summary = await syncAllUsers();
   res.json(summary);
+});
+
+// ── Web Push subscription endpoints ──────────────────────────────
+// Auth: the frontend sends the user's Supabase access token as a Bearer; we
+// verify it with the service-role client to resolve the user id, then store the
+// subscription inside that user's app_state row (data.pushSubscriptions[]).
+
+// Public VAPID key — safe to expose; frontend needs it to subscribe.
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: '伺服器未設定推播（VAPID 金鑰）' });
+  res.json({ key: process.env.VAPID_PUBLIC_KEY });
+});
+
+async function userFromBearer(req) {
+  if (!supabaseAdmin) throw Object.assign(new Error('伺服器未設定 Supabase'), { status: 503 });
+  const token = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) throw Object.assign(new Error('未登入'), { status: 401 });
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data?.user) throw Object.assign(new Error('登入憑證無效'), { status: 401 });
+  return data.user;
+}
+
+// Read-modify-write the user's app_state JSONB.
+async function updateUserData(userId, mutate) {
+  const { data: row, error } = await supabaseAdmin
+    .from('app_state').select('data').eq('user_id', userId).single();
+  if (error) throw new Error(error.message);
+  const data = row?.data || {};
+  const next = mutate(data);
+  const { error: upErr } = await supabaseAdmin
+    .from('app_state')
+    .update({ data: next, updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (upErr) throw new Error(upErr.message);
+}
+
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    const user = await userFromBearer(req);
+    const sub = req.body?.subscription;
+    if (!sub?.endpoint) return res.status(400).json({ error: '訂閱資料無效' });
+    await updateUserData(user.id, (data) => {
+      const subs = Array.isArray(data.pushSubscriptions) ? data.pushSubscriptions : [];
+      const others = subs.filter(s => s.endpoint !== sub.endpoint); // dedupe by endpoint
+      return { ...data, pushSubscriptions: [...others, sub] };
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/push/unsubscribe', async (req, res) => {
+  try {
+    const user = await userFromBearer(req);
+    const endpoint = req.body?.endpoint;
+    await updateUserData(user.id, (data) => {
+      const subs = Array.isArray(data.pushSubscriptions) ? data.pushSubscriptions : [];
+      return { ...data, pushSubscriptions: endpoint ? subs.filter(s => s.endpoint !== endpoint) : [] };
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Send a test push to the caller's own devices — lets the user confirm the
+// whole pipeline (subscription + SW) works without waiting for a real alert.
+app.post('/api/push/test', async (req, res) => {
+  try {
+    const user = await userFromBearer(req);
+    const { data: row, error } = await supabaseAdmin
+      .from('app_state').select('data').eq('user_id', user.id).single();
+    if (error) throw new Error(error.message);
+    const subs = Array.isArray(row?.data?.pushSubscriptions) ? row.data.pushSubscriptions : [];
+    if (!subs.length) return res.status(400).json({ error: '尚無已訂閱的裝置' });
+    const { survivors, sent, changed } = await sendPushToUser(subs, {
+      title: 'DiaGuide', body: '測試推播成功！高低血糖時會像這樣通知你。', tag: 'test', url: '/',
+    });
+    if (changed) await updateUserData(user.id, (data) => ({ ...data, pushSubscriptions: survivors }));
+    res.json({ ok: true, sent });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 // Best-effort in-process timer (fires only while the instance is awake; the

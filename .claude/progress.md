@@ -52,6 +52,33 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
   - 內建 6h `setInterval`（best-effort；免費版會休眠，靠外部 cron 才可靠）。
 - `render.yaml`：加 `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`CRON_SECRET`。
 
+### 註冊畫面確認密碼
+- `src/components/Auth.jsx`：register 模式加「再次輸入密碼」欄位；送出前比對不一致則擋下並提示「兩次輸入的密碼不一致」；切換模式清空。
+
+### 意見回饋
+- `src/components/Settings.jsx`：加「意見回饋」卡片，`mailto:wuborjenn@gmail.com`（主旨/內文預填）+ 明列來信信箱。
+
+### 手機推播（Web Push — 高低血糖警報）
+全套 Web Push 管線，App 關著也收得到（iOS 需加主畫面 PWA + 16.4+；Android Chrome 直接可）。
+- `public/sw.js`（新）：service worker，`push`→showNotification、`notificationclick`→聚焦/開 App。
+- `public/manifest.webmanifest`（新）：PWA manifest（standalone）。
+- `index.html`：加 manifest link + apple-touch-icon + apple-mobile-web-app-* meta。
+- `src/main.jsx`：load 時註冊 `/sw.js`。
+- `src/lib/push.js`（新）：`enablePush/disablePush/pushSubscribed/pushSupported/isIOS/isStandalone`；訂閱帶 Supabase access token 上傳。
+- `server/libre-proxy.js`：
+  - `web-push` + VAPID 初始化（`PUSH_ENABLED` 視 env 而定）。
+  - `GET /api/push/vapid-public-key`、`POST /api/push/subscribe`、`/unsubscribe`、`/test`（Bearer token → `supabaseAdmin.auth.getUser` 驗證 → 存入 `app_state.data.pushSubscriptions[]`）。
+  - `evalGlucoseAlert()`：latest <70=low / >180=high，cooldown 1h，回正常清狀態。
+  - `sendPushToUser()`：發給所有訂閱，404/410 自動移除失效訂閱。
+  - 整合進 `syncOneUser()`：每次排程同步檢查最新血糖，超標推播 + 寫回 `lastGlucoseAlert`；cron summary 加 `pushed`。
+- `package.json`：加 `web-push@^3.6.7`。
+- `render.yaml`：加 `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`。
+
+**已產生的 VAPID 金鑰（填到 Render env，私鑰機密）：**
+- `VAPID_PUBLIC_KEY=BE4Qmgp_YA-oKlVZy9mBA1LBrViw_ZhftBFP8_T7XmZx2oaHvr02natb0JVCkCwObQdKD6vy8861lEH8rfZPPnA`
+- `VAPID_PRIVATE_KEY=JTegyOtbQfq1O9rJ8IJ6D6gTp1SHN9EIx3JWbyfuMtg`
+- `VAPID_SUBJECT=mailto:wuborjenn@gmail.com`
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）
@@ -61,6 +88,7 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `SUPABASE_URL` = 同上（**後端執行時**讀，與 VITE_ 那個是不同變數，兩個都要）
 - `SUPABASE_SERVICE_ROLE_KEY` = service_role 金鑰（機密！繞 RLS）
 - `CRON_SECRET` = `3Qeeq9GHC2iPn41ZgWDUkHc7gnkNv7Vd`
+- `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`（手機推播；見上方已產生的金鑰）
 
 本機 `.env` 另有 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`（已 gitignore）供 `npm run dev` 用。
 

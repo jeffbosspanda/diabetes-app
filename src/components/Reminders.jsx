@@ -1,10 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import { Bell, Clock, Dumbbell, Syringe, Check } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import {
+  pushSupported, pushSubscribed, enablePush, disablePush, isIOS, isStandalone,
+} from '../lib/push';
 
 export default function Reminders() {
   const { state, dispatch } = useApp();
-  const [permGranted, setPermGranted] = useState(false);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState('');
 
   const rem = state.reminders;
   const set = (path, value) => {
@@ -16,19 +22,54 @@ export default function Reminders() {
     }
   };
 
+  const supported = pushSupported();
+  const needsInstall = isIOS() && !isStandalone();
+
   useEffect(() => {
-    if ('Notification' in window) {
-      Notification.requestPermission().then(p => setPermGranted(p === 'granted'));
-    }
+    pushSubscribed().then(setPushOn).catch(() => {});
   }, []);
 
-  const sendTestNotification = () => {
-    if (!permGranted) {
-      Notification.requestPermission().then(p => {
-        if (p === 'granted') { setPermGranted(true); new Notification('DiaGuide', { body: '通知功能已啟用！' }); }
+  const handleEnable = async () => {
+    setPushBusy(true); setPushMsg('');
+    try {
+      await enablePush();
+      setPushOn(true);
+      setPushMsg('已啟用！高低血糖時手機會收到通知。');
+    } catch (e) {
+      setPushMsg(e.message);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    setPushBusy(true); setPushMsg('');
+    try {
+      await disablePush();
+      setPushOn(false);
+      setPushMsg('已關閉手機推播。');
+    } catch (e) {
+      setPushMsg(e.message);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setPushBusy(true); setPushMsg('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch('/api/push/test', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
       });
-    } else {
-      new Notification('DiaGuide', { body: '測試通知成功！' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || '測試失敗');
+      setPushMsg(`已送出測試推播（${j.sent} 台裝置）。`);
+    } catch (e) {
+      setPushMsg(e.message);
+    } finally {
+      setPushBusy(false);
     }
   };
 
@@ -42,14 +83,36 @@ export default function Reminders() {
 
       <div className="card">
         <div className="card-header-row">
-          <h3>推播通知</h3>
-          <span className={`badge ${permGranted ? 'badge-green' : 'badge-red'}`}>
-            {permGranted ? '已啟用' : '未啟用'}
+          <h3>手機推播（高低血糖警報）</h3>
+          <span className={`badge ${pushOn ? 'badge-green' : 'badge-red'}`}>
+            {pushOn ? '已啟用' : '未啟用'}
           </span>
         </div>
-        <button className="btn-secondary" onClick={sendTestNotification}>
-          {permGranted ? '發送測試通知' : '啟用通知'}
-        </button>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          啟用後，後端同步偵測到血糖低於 70 或高於 180 mg/dL 時，即使 App 沒開，手機也會收到系統通知。
+        </p>
+
+        {!supported ? (
+          <p className="hint" style={{ color: 'var(--red)' }}>此瀏覽器不支援推播通知。</p>
+        ) : needsInstall ? (
+          <p className="hint" style={{ color: 'var(--orange, #e67e22)' }}>
+            iPhone 請先用 Safari 開啟本頁 → 分享 → <b>加入主畫面</b>，再從主畫面圖示開啟 App 才能啟用推播（iOS 限制）。
+          </p>
+        ) : !pushOn ? (
+          <button className="btn-primary" onClick={handleEnable} disabled={pushBusy}>
+            {pushBusy ? '啟用中…' : '啟用手機推播'}
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-secondary" onClick={handleTest} disabled={pushBusy}>發送測試推播</button>
+            <button className="btn-danger" onClick={handleDisable} disabled={pushBusy}>關閉推播</button>
+          </div>
+        )}
+
+        {pushMsg && <p className="hint" style={{ marginTop: 8 }}>{pushMsg}</p>}
+        <p className="hint" style={{ marginTop: 8, opacity: 0.7 }}>
+          註：警報於後端排程同步時檢查（約每 6 小時），非即時連續監測。
+        </p>
       </div>
 
       <div className="card">

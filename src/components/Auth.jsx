@@ -19,6 +19,7 @@ export default function Auth() {
   const [mode, setMode] = useState('login'); // login | register | forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -41,6 +42,11 @@ export default function Auth() {
     setError(''); setNotice(''); setBusy(true);
     try {
       if (mode === 'register') {
+        if (password !== confirmPassword) {
+          setError('兩次輸入的密碼不一致');
+          setBusy(false);
+          return;
+        }
         await signUp(email.trim(), password);
         setNotice('註冊成功！若需 email 驗證，請到信箱點擊連結後再登入。');
         setMode('login');
@@ -88,6 +94,18 @@ export default function Auth() {
           </label>
         )}
 
+        {mode === 'register' && (
+          <label className="auth-field">
+            <Lock size={16} />
+            <input
+              type="password" placeholder="再次輸入密碼" required minLength={6}
+              value={confirmPassword}
+              autoComplete="new-password"
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </label>
+        )}
+
         <button className="auth-btn" type="submit" disabled={busy}>
           {mode === 'register' ? <><UserPlus size={16} /> 註冊</>
             : mode === 'forgot' ? '寄送重設信'
@@ -97,16 +115,16 @@ export default function Auth() {
         <div className="auth-links">
           {mode === 'login' && (
             <>
-              <button type="button" onClick={() => { setMode('register'); setError(''); setNotice(''); }}>
+              <button type="button" onClick={() => { setMode('register'); setError(''); setNotice(''); setConfirmPassword(''); }}>
                 還沒有帳號？註冊
               </button>
-              <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}>
+              <button type="button" onClick={() => { setMode('forgot'); setError(''); setNotice(''); setConfirmPassword(''); }}>
                 忘記密碼
               </button>
             </>
           )}
           {mode !== 'login' && (
-            <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}>
+            <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); setConfirmPassword(''); }}>
               ← 回登入
             </button>
           )}

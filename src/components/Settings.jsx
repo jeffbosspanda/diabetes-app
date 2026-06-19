@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText } from 'lucide-react';
+import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare } from 'lucide-react';
 import { INSULIN_BRANDS } from '../utils/insulinCalculator';
 import { openReport } from '../utils/reportGenerator';
 import LibreSync from './LibreSync';
@@ -206,6 +206,23 @@ export default function Settings() {
             <Trash2 size={14} /> 清除全部資料
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <h3><MessageSquare size={16} /> 意見回饋</h3>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          使用心得、功能建議，或遇到 bug，歡迎來信告知，協助我們改進。
+        </p>
+        <a
+          className="btn-primary full-width"
+          style={{ marginTop: 4, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          href="mailto:wuborjenn@gmail.com?subject=DiaGuide%20%E6%84%8F%E8%A6%8B%E5%9B%9E%E9%A5%8B&body=%E4%BD%BF%E7%94%A8%E5%BF%83%E5%BE%97%20%2F%20%E9%81%87%E5%88%B0%E7%9A%84%E5%95%8F%E9%A1%8C%EF%BC%9A%0A%0A"
+        >
+          <MessageSquare size={15} /> 寄送回饋
+        </a>
+        <p className="hint" style={{ marginTop: 6 }}>
+          來信信箱：wuborjenn@gmail.com
+        </p>
       </div>
 
       <div className="card">
