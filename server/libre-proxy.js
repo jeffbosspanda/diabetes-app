@@ -319,9 +319,13 @@ async function syncAllUsers() {
 // Triggered by an external scheduler (e.g. cron-job.org) every ~6h. Guarded by
 // CRON_SECRET via header or ?key= so randoms can't run it.
 app.all('/api/cron/sync-all', async (req, res) => {
-  const secret = req.get('x-cron-secret') || req.query.key;
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'unauthorized' });
+  const configured = (process.env.CRON_SECRET || '').trim();
+  const secret = (req.get('x-cron-secret') || req.query.key || '').trim();
+  if (!configured) {
+    return res.status(503).json({ error: 'CRON_SECRET 未設定（Render 環境變數）' });
+  }
+  if (secret !== configured) {
+    return res.status(401).json({ error: 'key 不符', gotLen: secret.length, expectLen: configured.length });
   }
   const summary = await syncAllUsers();
   res.json(summary);
