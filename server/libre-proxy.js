@@ -41,8 +41,25 @@ async function sha256hex(str) {
   return createHash('sha256').update(str).digest('hex');
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// fetch wrapper that retries once on Cloudflare 429 (rate limit) honoring
+// retry_after. Render runs on a shared datacenter IP that LibreView throttles
+// aggressively, so a single polite backoff prevents most transient failures.
+async function libreFetch(url, opts) {
+  let res = await fetch(url, opts);
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('retry-after') || '30', 10);
+    const waitMs = Math.min(Math.max(retryAfter, 5), 35) * 1000;
+    console.warn(`[LibreProxy] 429 rate-limited, 等 ${waitMs / 1000}s 後重試 ${url}`);
+    await sleep(waitMs);
+    res = await fetch(url, opts);
+  }
+  return res;
+}
+
 async function libre_login(username, password, baseURL = DEFAULT_URL) {
-  const res = await fetch(`${baseURL}/llu/auth/login`, {
+  const res = await libreFetch(`${baseURL}/llu/auth/login`, {
     method: 'POST',
     headers: {
       'User-Agent': `LibreLinkUp/${CLIENT_VERSION} CFNetwork/1490.0.4 Darwin/23.2.0`,
@@ -80,7 +97,8 @@ async function libre_login(username, password, baseURL = DEFAULT_URL) {
   };
 }
 
-async function libre_read(token, accountId, baseURL) {
+async function libre_read(session) {
+  const { token, accountId, baseURL } = session;
   const accountHash = await sha256hex(accountId);
 
   const headers = {
@@ -94,17 +112,22 @@ async function libre_read(token, accountId, baseURL) {
     'version': CLIENT_VERSION,
   };
 
-  // Get connections
-  const connRes = await fetch(`${baseURL}/llu/connections`, { headers });
-  const connJson = await connRes.json();
+  // patientId is stable per account — cache it on the session so repeat syncs
+  // skip the /connections call entirely (halves API requests = fewer 429s).
+  let patientId = session.patientId;
+  if (!patientId) {
+    const connRes = await libreFetch(`${baseURL}/llu/connections`, { headers });
+    const connJson = await connRes.json();
 
-  if (!connRes.ok) throw new Error(`connections HTTP ${connRes.status}: ${JSON.stringify(connJson)}`);
-  if (!connJson.data?.length) throw new Error('無連線患者。請在手機 LibreLinkUp 開啟「連線共享」並確認連接');
+    if (!connRes.ok) throw new Error(`connections HTTP ${connRes.status}: ${JSON.stringify(connJson)}`);
+    if (!connJson.data?.length) throw new Error('無連線患者。請在手機 LibreLinkUp 開啟「連線共享」並確認連接');
 
-  const patientId = connJson.data[0].patientId;
+    patientId = connJson.data[0].patientId;
+    session.patientId = patientId;
+  }
 
   // Get graph data
-  const graphRes = await fetch(`${baseURL}/llu/connections/${patientId}/graph`, { headers });
+  const graphRes = await libreFetch(`${baseURL}/llu/connections/${patientId}/graph`, { headers });
   const graphJson = await graphRes.json();
 
   if (!graphRes.ok) throw new Error(`graph HTTP ${graphRes.status}: ${JSON.stringify(graphJson)}`);
@@ -149,7 +172,7 @@ app.post('/api/libre/sync', async (req, res) => {
 
   try {
     const session = await getSession(username, password);
-    const { current, history } = await libre_read(session.token, session.accountId, session.baseURL);
+    const { current, history } = await libre_read(session);
 
     const readings = [current, ...history].filter(Boolean);
     res.json({ readings, count: readings.length });
