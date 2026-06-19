@@ -50,7 +50,7 @@ function reducer(state, action) {
     case 'UPDATE_SETTINGS': return { ...state, settings: { ...state.settings, ...action.payload } };
     case 'UPDATE_ICR_ISF': return { ...state, icr: action.payload.icr, isf: action.payload.isf };
     case 'SET_DATA_FLAGS': return { ...state, dataInsufficiencyFlags: action.payload };
-    case 'LOAD_STATE': return { ...initialState, ...action.payload };
+    case 'LOAD_STATE': return { ...state, ...action.payload };
     default: return state;
   }
 }
