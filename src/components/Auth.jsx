@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../store/AuthContext';
-import { supabaseReady } from '../lib/supabase';
+import { supabaseReady, supabaseUrl, supabaseKeyHint } from '../lib/supabase';
 import { Mail, Lock, LogIn, UserPlus } from 'lucide-react';
 
 // Map common Supabase auth errors to Chinese
@@ -22,6 +22,21 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [diag, setDiag] = useState('');
+
+  // Diagnostic: hit Supabase auth health straight from this device and show
+  // the raw outcome — pinpoints "invalid path" / network / CORS issues.
+  const testConn = async () => {
+    setDiag('測試中…');
+    const target = `${supabaseUrl}/auth/v1/health`;
+    try {
+      const r = await fetch(target);
+      const body = await r.text();
+      setDiag(`URL: ${supabaseUrl}\nHTTP ${r.status}\n${body.slice(0, 200)}`);
+    } catch (e) {
+      setDiag(`URL: ${supabaseUrl}\nFETCH FAILED: ${e.message}`);
+    }
+  };
 
   if (!supabaseReady) {
     return (
@@ -110,6 +125,14 @@ export default function Auth() {
               ← 回登入
             </button>
           )}
+        </div>
+
+        {/* 診斷區（暫時）：確認連線設定 */}
+        <div className="auth-diag">
+          <div>host: {supabaseUrl || '(未設定)'}</div>
+          <div>key: {supabaseKeyHint}</div>
+          <button type="button" onClick={testConn}>測試連線</button>
+          {diag && <pre>{diag}</pre>}
         </div>
       </form>
     </div>
