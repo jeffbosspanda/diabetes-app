@@ -176,17 +176,7 @@ async function libre_read(session) {
   const current = gm ? mapReading(gm) : null;
   const history = (graphData || []).map(mapReading);
 
-  // Temporary diagnostic: surface the raw LibreLink timestamps of the current
-  // reading so we can verify timezone handling end-to-end.
-  const debug = gm ? {
-    FactoryTimestamp: gm.FactoryTimestamp,
-    Timestamp: gm.Timestamp,
-    parsedISO: current?.timestamp,
-    serverNowISO: new Date().toISOString(),
-    serverTZ: process.env.TZ || 'unset',
-  } : null;
-
-  return { current, history, debug };
+  return { current, history };
 }
 
 // Session cache: key → { token, accountId, baseURL, expiresAt }
@@ -223,10 +213,10 @@ app.post('/api/libre/sync', async (req, res) => {
 
   try {
     const session = await getSession(username, password);
-    const { current, history, debug } = await libre_read(session);
+    const { current, history } = await libre_read(session);
 
     const readings = [current, ...history].filter(Boolean);
-    const data = { readings, count: readings.length, debug };
+    const data = { readings, count: readings.length };
     readCache.set(username, { data, fetchedAt: Date.now() });
     res.json(data);
   } catch (err) {

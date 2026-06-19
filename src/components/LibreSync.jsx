@@ -17,7 +17,6 @@ export default function LibreSync() {
   const [lastSync, setLastSync]       = useState(null);
   const [latestReading, setLatestReading] = useState(null);
   const [autoSyncActive, setAutoSyncActive] = useState(false);
-  const [debug, setDebug] = useState(null);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -34,8 +33,7 @@ export default function LibreSync() {
     if (!username || !password) return;
     setStatus('syncing');
     try {
-      const { readings, count, debug } = await syncLibreData(username, password);
-      setDebug(debug || null);
+      const { readings, count } = await syncLibreData(username, password);
       const existing = new Set(stateRef.current.glucoseReadings.map(r => r.timestamp));
       const newReadings = readings.filter(r => !existing.has(r.timestamp));
       newReadings.forEach(r => dispatch({ type: 'ADD_GLUCOSE', payload: r }));
@@ -153,18 +151,6 @@ export default function LibreSync() {
             <Unlink size={13} />
           </button>
         </div>
-      )}
-
-      {/* 暫時診斷：原始時間戳 */}
-      {debug && (
-        <pre style={{ fontSize: 11, background: 'var(--surface2)', padding: 8, borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: 8 }}>
-          {`FactoryTimestamp: ${debug.FactoryTimestamp}
-Timestamp: ${debug.Timestamp}
-parsedISO: ${debug.parsedISO}
-本機顯示: ${debug.parsedISO ? new Date(debug.parsedISO).toLocaleString('zh-TW') : '-'}
-serverNow: ${debug.serverNowISO}
-serverTZ: ${debug.serverTZ}`}
-        </pre>
       )}
 
       {/* Status message */}
