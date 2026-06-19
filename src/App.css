@@ -1517,6 +1517,7 @@ textarea { resize: vertical; }
   background: rgba(43, 182, 115, 0.14); color: #1f7a51;
   border-radius: 10px; padding: 10px 12px; font-size: 13px;
 }
+.change-pw-form { display: flex; flex-direction: column; gap: 10px; }
 
 .auth-diag {
   margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
@@ -1559,6 +1560,18 @@ textarea { resize: vertical; }
 .onboard-title { font-size: 17px; margin: 0 0 8px; }
 .onboard-body { font-size: 13px; line-height: 1.6; color: var(--text-secondary); margin: 0 0 14px; text-align: left; }
 .onboard-action { margin-bottom: 4px; }
+.onboard-notify { text-align: left; }
+.onboard-hint { font-size: 11px; color: var(--text-muted); margin: 10px 0 0; text-align: left; }
+.notify-os {
+  border: 1px solid var(--border, #eee); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 10px; background: var(--surface2, #f7f7fa);
+}
+.notify-os-active { border-color: var(--accent, #863bff); box-shadow: 0 0 0 2px rgba(134, 59, 255, 0.12); }
+.notify-os-head { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.notify-steps { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); }
+.notify-steps b { color: var(--text); }
+.notify-warn { margin-top: 8px; font-size: 12px; color: #b4453f; background: rgba(239, 138, 138, 0.14); border-radius: 8px; padding: 7px 9px; }
+.notify-ok   { margin-top: 8px; font-size: 12px; color: #1f7a51; background: rgba(43, 182, 115, 0.14); border-radius: 8px; padding: 7px 9px; }
 .onboard-areas { list-style: none; padding: 0; margin: 0 0 12px; text-align: left; }
 .onboard-area { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border, #eee); }
 .onboard-area:last-child { border-bottom: none; }
@@ -1617,9 +1630,27 @@ textarea { resize: vertical; }
 .cycle-note { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }
 .cycle-meta { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
 
+/* Personalized per-phase glucose impact */
+.cycle-impact { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border, #e6e6ea); }
+.cycle-impact-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+.cycle-bars { display: flex; flex-direction: column; gap: 6px; }
+.cycle-bar-row { display: flex; align-items: center; gap: 8px; }
+.cycle-bar-row.cur { background: var(--surface2, #f5f5f8); border-radius: 8px; padding: 2px 6px; margin: 0 -6px; }
+.cb-label { font-size: 12px; font-weight: 700; min-width: 30px; }
+.cb-track { flex: 1; height: 9px; background: var(--surface2, #eee); border-radius: 999px; overflow: hidden; }
+.cb-fill { display: block; height: 100%; border-radius: 999px; transition: width 0.3s; }
+.cb-val { font-size: 12px; font-weight: 700; min-width: 64px; text-align: right; }
+.cb-val small { font-size: 10px; font-weight: 500; color: var(--text-muted); }
+.cycle-insight { margin-top: 8px; font-size: 12px; line-height: 1.55; border-radius: 8px; padding: 8px 10px; }
+.cycle-insight-warn { background: rgba(245, 158, 11, 0.13); color: #9a6400; }
+.cycle-insight-info { background: rgba(59, 130, 246, 0.12); color: #2456a6; }
+.cycle-insight-good { background: rgba(43, 182, 115, 0.14); color: #1f7a51; }
+.cycle-impact-hint { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border, #e6e6ea); font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+
 /* ── Sick-day guidance ── */
 .sickday-list { margin: 0 0 8px; padding-left: 18px; }
 .sickday-list li { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); margin-bottom: 4px; }
+.sickday-med-head { font-size: 13px; font-weight: 700; margin: 10px 0 6px; }
 .sickday-alert {
   background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
   border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.6; color: #b91c1c;

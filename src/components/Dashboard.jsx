@@ -17,7 +17,7 @@ import { computeDailySummary } from '../utils/dailySummary';
 import { predictBG30 } from '../utils/bgPredictor';
 import { computeMealPatternInsights } from '../utils/mealPatternInsights';
 import { computeAchievements } from '../utils/achievements';
-import { computeCyclePhase } from '../utils/cyclePhase';
+import { computeCyclePhase, analyzeCycleGlucoseImpact } from '../utils/cyclePhase';
 import { format, subHours, subDays } from 'date-fns';
 
 // ── High-contrast palette ───────────────────────────────────────────────────
@@ -234,6 +234,14 @@ export default function Dashboard() {
     return computeCyclePhase(state.profile?.lastPeriodStart, parseInt(state.profile?.cycleLength) || 28);
   }, [state.profile]);
 
+  // Personalized cycle→glucose impact from the user's own readings.
+  const cycleImpact = useMemo(() => {
+    if (state.profile?.gender !== 'female' || !state.profile?.lastPeriodStart) return null;
+    return analyzeCycleGlucoseImpact(
+      state.glucoseReadings, state.profile.lastPeriodStart, parseInt(state.profile?.cycleLength) || 28
+    );
+  }, [state.profile, state.glucoseReadings]);
+
   // x-axis pinned to the selected day; explicit ticks force the full range
   const xDomain = useMemo(() => [winLo, winHi], [selDay]);
   const xTicks = useMemo(() => {
@@ -388,6 +396,39 @@ export default function Dashboard() {
             </span>
           </div>
           <div className="cycle-note">{cycle.note}</div>
+
+          {/* Personalized: the user's own avg BG per phase — makes the effect tangible */}
+          {cycleImpact?.hasData && (() => {
+            const shown = cycleImpact.phases.filter(p => p.enough);
+            const maxAvg = Math.max(...shown.map(p => p.avg), 1);
+            return (
+              <div className="cycle-impact" onClick={(e) => e.stopPropagation()}>
+                <div className="cycle-impact-title">📊 你各階段的平均血糖</div>
+                <div className="cycle-bars">
+                  {shown.map(p => (
+                    <div key={p.key} className={`cycle-bar-row ${p.key === cycle.phase ? 'cur' : ''}`}>
+                      <span className="cb-label" style={{ color: p.color }}>{p.short}</span>
+                      <span className="cb-track">
+                        <span className="cb-fill" style={{ width: `${Math.round(p.avg / maxAvg * 100)}%`, background: p.color }} />
+                      </span>
+                      <span className="cb-val">{p.avg}<small> mg/dL</small></span>
+                    </div>
+                  ))}
+                </div>
+                {cycleImpact.insights.map((ins, i) => (
+                  <div key={i} className={`cycle-insight cycle-insight-${ins.level}`}>{ins.text}</div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Not enough data yet → tell them what unlocks the personal comparison */}
+          {cycleImpact && !cycleImpact.enoughForCompare && (
+            <div className="cycle-impact-hint" onClick={(e) => e.stopPropagation()}>
+              持續記錄滿一個完整週期，系統就會用「你自己的血糖」對比各階段，讓你親眼看見生理期對血糖的影響。
+            </div>
+          )}
+
           <div className="cycle-meta">距下次經期約 {cycle.daysToNextPeriod} 天 · 點此更新經期</div>
         </div>
       )}

@@ -1,9 +1,68 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle, GraduationCap } from 'lucide-react';
+import { useAuth } from '../store/AuthContext';
+import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle, GraduationCap, KeyRound, Lock } from 'lucide-react';
 import { INSULIN_BRANDS } from '../utils/insulinCalculator';
 import { openReport } from '../utils/reportGenerator';
 import LibreSync from './LibreSync';
+
+function zhPwError(msg = '') {
+  if (/Password should be at least/i.test(msg)) return '密碼至少需 6 個字元';
+  if (/New password should be different/i.test(msg)) return '新密碼不可與舊密碼相同';
+  if (/session|expired|not.*authenticated/i.test(msg)) return '登入已過期，請重新登入後再修改';
+  if (/rate limit|too many/i.test(msg)) return '嘗試太頻繁，請稍後再試';
+  return msg || '發生錯誤，請重試';
+}
+
+// In-app change-password card (uses the current session; no email round-trip)
+function ChangePassword() {
+  const { updatePassword } = useAuth();
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(''); setNotice('');
+    if (pw !== pw2) { setError('兩次輸入的密碼不一致'); return; }
+    setBusy(true);
+    try {
+      await updatePassword(pw);
+      setNotice('密碼已更新');
+      setPw(''); setPw2('');
+    } catch (err) {
+      setError(zhPwError(err.message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h3><KeyRound size={16} /> 修改密碼</h3>
+      <p className="hint" style={{ marginBottom: 10 }}>更新登入密碼，立即生效。</p>
+      <form onSubmit={submit} className="change-pw-form">
+        {notice && <div className="auth-notice">{notice}</div>}
+        {error && <div className="auth-error">{error}</div>}
+        <label className="auth-field">
+          <Lock size={16} />
+          <input type="password" placeholder="新密碼（至少 6 字元）" required minLength={6}
+            value={pw} autoComplete="new-password" onChange={(e) => setPw(e.target.value)} />
+        </label>
+        <label className="auth-field">
+          <Lock size={16} />
+          <input type="password" placeholder="再次輸入新密碼" required minLength={6}
+            value={pw2} autoComplete="new-password" onChange={(e) => setPw2(e.target.value)} />
+        </label>
+        <button className="btn-primary full-width" type="submit" disabled={busy} style={{ marginTop: 4 }}>
+          <KeyRound size={15} /> 更新密碼
+        </button>
+      </form>
+    </div>
+  );
+}
 
 function BrandSelector({ label, colorClass, brands, confirmed, selectedBrand, onSelect, onConfirm, onChangeRequest }) {
   return (
@@ -242,6 +301,8 @@ export default function Settings() {
           ))}
         </div>
       </div>
+
+      <ChangePassword />
 
       <div className="card">
         <h3><MessageSquare size={16} /> 意見回饋</h3>

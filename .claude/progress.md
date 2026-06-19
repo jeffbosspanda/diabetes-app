@@ -1,6 +1,6 @@
 # DiaGuide 進度存檔
 
-存檔時間：2026-06-19
+存檔時間：2026-06-20
 
 ## 本輪任務：上線到雲端 + 多人帳號 + 自動同步
 
@@ -160,6 +160,54 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `src/utils/secondWave.js`（新）：`analyzeSecondWave(meals,glucose,insulin,{days})`。每餐取餐前基準、前段(0–2h)峰、2h 值、2–5h 峰與中間谷；判定第二波＝2h 後再升 ≥25 且峰 ≥160 且（有谷時）較谷高 ≥25 且峰在 130min 後。產出原因（高脂高蛋白延遲消化／餐前胰島素藥效已退／無餐前胰島素）與建議（分次注射、餐後 2–3h 補打校正）。回傳 summary（count/examined/pct）。
 - `src/components/GlucoseLog.jsx`：加「餐後第二波升糖分析」卡（預設 3 筆 + 顯示更多），days 依所選範圍推算。
 - 單測：早峰140→2h回落120→第二波175@210min → 正確判定。
+
+### ⚠️ 部署狀態（待處理）— Render deploy 失敗
+- 最新 commit `7da291d`（餐後第二波/逐項食物/預測分級）Render 部署回報失敗，「latest changes may not be live」。
+- 本機已驗證**程式碼無誤**：`npm run build` 過（2710 模組全轉譯）、`node --check server/libre-proxy.js` OK、`package-lock.json` 含全平台 rolldown binding（含 linux-x64-gnu）、新檔名大小寫正確。本 commit 未改 server。
+- 結論：失敗在 **Render 端**，非程式碼。最可能：(1) build OOM（free tier 記憶體小，vite8/rolldown 吃記憶體，bundle 已 ~1MB；log 會見 `JavaScript heap out of memory`）；(2) health check 逾時（free 冷啟動慢）；(3) 暫時性 infra。
+- **下一步（待使用者）**：貼 Render deploy 失敗 log 紅字（`==> Build failed` / `Exited with status` 前後幾行）以定位；或先試 Render → Manual Deploy → **Clear build cache & deploy**。
+- 若確認 OOM：可在 vite.config.js 加 `manualChunks` 拆分（recharts 等）降低記憶體尖峰，或升級 Render 方案。
+- 註：本機 `npm ci` 會 EPERM（vite 預覽程序鎖住 rolldown binding），與 Render 無關。
+
+### 2026-06-20 批次（忘記/修改密碼、長效低血糖、教學通知、生理期個人化、生病用藥）
+
+#### 忘記密碼閉環 + 設定修改密碼
+- `src/store/AuthContext.jsx`：加 `recovery` state（監聽 `PASSWORD_RECOVERY` 事件）+ `updatePassword(newPw)`（`supabase.auth.updateUser`，成功清 recovery）。
+- `src/components/ResetPassword.jsx`（新）：點重設信回 App 後的「設定新密碼」畫面（新密碼 + 再次輸入比對，錯誤中文化）。
+- `src/App.jsx` `Gate`：`recovery` 為真時優先顯示 `<ResetPassword/>`（先於登入閘）。
+- `src/components/Settings.jsx`：加「🔑 修改密碼」卡（`ChangePassword` 子元件，session 內直接改、免 email；新密碼+確認）。
+- `src/App.css`：`.change-pw-form`。
+- 註：登入頁「忘記密碼」按鈕本就送重設信，缺的是點信後設新密碼這半段，已補齊。
+- **待設定**：Supabase → Auth → URL Configuration 把 `https://diaguide-4r5o.onrender.com` 加進 Redirect URLs，否則點信跳不回（`redirectTo` 用 `window.location.origin`）。
+
+#### 長效胰島素評估強化（飯前/夜間低血糖 → 請使用者降劑量）
+- `src/utils/insulinCalculator.js` `analyzeBasalAdequacy()` 重寫：夜間（00–07）+ 空腹（06–09:30）**兩窗各自獨立**掃低血糖（舊版只取其一→漏掉另一窗）。任一窗出現低血糖即優先回 `too_high` + `reduceDose:true`，明確提示減少長效劑量。
+  - 嚴重度：最低<54 或反覆≥2 次 → `danger`（減 2 U）；單次 → `warning`（減 1–2 U）。訊息標明地點/次數/最低值 + 目前劑量，附「先補速效糖」「與醫師確認」。
+  - 新欄位：`nightLowCount`/`fastingLowCount`/`minLow`/`reduceDose`（不影響既有 UI，照讀 message/suggestion/severity/avgBG/avgLongDose）。
+- UI（`InsulinAdvisor.jsx`「長效胰島素評估」卡）自動吃新 message/suggestion，未改。
+- node 實測 3 案通過（空腹單低→warning、夜間嚴重低→danger、全好→adequate）。
+- 已知：badge 文字寫死「夜間均值」，樣本退用空腹時字面略不符（未改）。
+
+#### 新手教學加「開啟手機通知」步驟
+- `src/components/Onboarding.jsx`：第⑥步「開啟手機通知」（`body:'NOTIFY'` sentinel），iOS/Android 各自步驟卡，action 導 `/reminders`。
+  - 用 `isIOS()`/`isStandalone()`（`src/lib/push.js`）偵測：Safari 分頁開→紅字警告先加主畫面；已 standalone→綠字可直接啟用。偵測到的系統卡片紫框高亮。
+  - 步驟數變 8（onboardingStep 動態長度，相容）。提醒頁啟用鈕本就存在，action 路徑有效。
+- `src/App.css`：`.notify-os`/`.notify-steps`/`.notify-warn`/`.notify-ok`。
+
+#### 女性生理期「個人化」血糖影響 + 生病用藥
+重點：讓使用者用**自己的血糖數字**親眼看見生理期影響。
+- `src/utils/cyclePhase.js`：
+  - 抽出 `phaseForDayInCycle(dayInCycle,len)` + `CYCLE_PHASE_META`（label/short/bgTrend/level/color），`computeCyclePhase` 改用、去重。
+  - 新 `analyzeCycleGlucoseImpact(readings, lastPeriodStart, cycleLength)`：近 120 天血糖依「發生在週期哪階段」模運算分桶 → 各階段 n/平均/低血糖%/高血糖%/TIR%（每階段需 ≥8 筆才報）。產生洞見：黃體 vs 濾泡平均差 ≥8→「你的黃體期平均 X，比濾泡期高 N」；月經期低血糖 ≥12%→補糖提醒。回 `phases`/`byKey`/`lutealDelta`/`insights`/`enoughForCompare`。
+- `src/components/Dashboard.jsx`：生理期卡加 `cycleImpact` useMemo + 渲染「📊 各階段平均血糖橫條圖」（當前階段高亮、配色）+ 個人化洞見文字；資料不足顯示「記錄滿一個完整週期就能對比」提示（給動機）。卡內互動加 `stopPropagation` 避免誤觸導頁。
+- `src/App.css`：`.cycle-impact`/`.cycle-bars`/`.cycle-bar-row.cur`/`.cb-*`/`.cycle-insight-*`/`.cycle-impact-hint`。
+- `src/components/Reminders.jsx`：sick-day 卡擴充——拆出獨立「💊 生病用藥對血糖的影響」段（會升血糖：類固醇/含糖糖漿；相對安全：普拿疼；生病需暫停：metformin/SGLT2 脫水＋正常血糖型酮酸；抗生素）；補強胰島素更需要、酮體高需額外速效、就醫時機加「喝不下水/喘/嗜睡」。
+- `src/App.css`：`.sickday-med-head`。
+- node 實測 `analyzeCycleGlucoseImpact`：黃體比濾泡高 50 → headline 洞見正確觸發、各桶分類正確。
+
+#### 本批驗證
+- 全部改動經 Vite HMR 熱更新無錯（dev server 持續運行）。`insulinCalculator`/`cyclePhase` 兩支純函式以 node 單測通過。
+- 密碼/教學/生理期卡多在登入或特定條件後（女性+經期資料），preview 未登入未做互動截圖。
 
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 

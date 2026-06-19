@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import {
   User, Activity, Utensils, Syringe, Bell, Settings as Gear, X, ChevronRight, ChevronLeft, GraduationCap,
 } from 'lucide-react';
+import { isIOS, isStandalone } from '../lib/push';
 
 // Guided first-login tour. Walks the user step-by-step and — crucially — does NOT
 // end when they jump to a page: it minimizes to a floating「繼續教學」pill so they
@@ -68,6 +69,12 @@ export default function Onboarding() {
       action: { label: '前往劑量頁', path: '/insulin' },
     },
     {
+      icon: <Bell size={26} />,
+      title: '⑥ 開啟手機通知',
+      body: 'NOTIFY',
+      action: { label: '前往「提醒」頁啟用推播', path: '/reminders' },
+    },
+    {
       icon: '🧭',
       title: '完成！各區塊總覽',
       body: 'AREAS',
@@ -91,6 +98,9 @@ export default function Onboarding() {
 
   // Navigate for an action step, then minimize so the page is usable (tour stays alive).
   const goAndMinimize = (path) => { nav(path); setMinimized(true); };
+
+  const ios = isIOS();
+  const standalone = isStandalone();
 
   const AREAS = [
     { icon: <Activity size={16} />, name: '血糖', desc: '趨勢圖、達標率、高低血糖分析' },
@@ -120,6 +130,43 @@ export default function Onboarding() {
               </li>
             ))}
           </ul>
+        ) : cur.body === 'NOTIFY' ? (
+          <div className="onboard-notify">
+            <p className="onboard-body">
+              開啟手機通知，App 關著也能收到高低血糖警報。請依你的手機系統操作：
+            </p>
+
+            <div className={`notify-os ${ios ? 'notify-os-active' : ''}`}>
+              <div className="notify-os-head">🍎 iPhone / iPad（iOS 16.4 以上）</div>
+              <ol className="notify-steps">
+                <li>用 <b>Safari</b> 開啟本網站</li>
+                <li>點底部「分享」鈕 → <b>加入主畫面</b></li>
+                <li>從主畫面的 App 圖示重新開啟（必須從主畫面開，Safari 分頁不行）</li>
+                <li>到「提醒」頁點 <b>啟用推播</b> → 允許通知</li>
+              </ol>
+              {ios && !standalone && (
+                <div className="notify-warn">
+                  ⚠️ 偵測到你正用 Safari 分頁開啟，尚未加入主畫面。請先完成步驟 1–3 再啟用。
+                </div>
+              )}
+              {ios && standalone && (
+                <div className="notify-ok">✓ 已從主畫面開啟，可直接到「提醒」頁啟用推播。</div>
+              )}
+            </div>
+
+            <div className={`notify-os ${!ios ? 'notify-os-active' : ''}`}>
+              <div className="notify-os-head">🤖 Android</div>
+              <ol className="notify-steps">
+                <li>用 <b>Chrome</b> 開啟本網站（可選：選單 → 加入主畫面，更穩定）</li>
+                <li>到「提醒」頁點 <b>啟用推播</b></li>
+                <li>跳出系統視窗時選 <b>允許</b> 通知</li>
+              </ol>
+            </div>
+
+            <p className="onboard-hint">
+              註：警報於背景同步時檢查（約每 6 小時），非即時連續監測。
+            </p>
+          </div>
         ) : (
           <p className="onboard-body">{cur.body}</p>
         )}

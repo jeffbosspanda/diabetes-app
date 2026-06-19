@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router
 import { AppProvider, useApp } from './store/AppContext';
 import { AuthProvider, useAuth } from './store/AuthContext';
 import Auth from './components/Auth';
+import ResetPassword from './components/ResetPassword';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import GlucoseLog from './components/GlucoseLog';
@@ -133,10 +134,14 @@ function Layout() {
 
 // Gate: require login before the app loads (when Supabase is configured)
 function Gate() {
-  const { user, loading } = useAuth();
+  const { user, loading, recovery } = useAuth();
 
   if (supabaseReady && loading) {
     return <div className="auth-wrap"><div className="auth-spinner">載入中…</div></div>;
+  }
+  // Opened a reset-password link → force set-new-password before anything else
+  if (supabaseReady && recovery) {
+    return <ResetPassword />;
   }
   if (supabaseReady && !user) {
     return <Auth />;

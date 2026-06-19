@@ -326,6 +326,8 @@ export function proposeICRCorrection(meals, glucoseReadings, insulinLogs, active
 }
 
 // ── Basal (long-acting) adequacy assessment ──────────────────────────────
+// 特別把關：飯前（空腹）或夜間若出現低血糖，長效（基礎）劑量通常偏高 →
+// 明確提示使用者「減少長效劑量」。低血糖優先於其他判斷（安全第一）。
 export function analyzeBasalAdequacy(glucoseReadings, insulinLogs) {
   const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
 
@@ -354,28 +356,49 @@ export function analyzeBasalAdequacy(glucoseReadings, insulinLogs) {
     return { status: 'insufficient_data', avgLongDose };
   }
 
+  // ── 低血糖優先掃描：夜間 + 空腹兩個窗各自獨立計算，避免只看其一而漏掉 ──
+  const nightLows   = overnight.filter(r => r.value < 70);
+  const fastingLows = fasting.filter(r => r.value < 70);
+  const nightLowCount   = nightLows.length;
+  const fastingLowCount = fastingLows.length;
+  const totalLowCount   = nightLowCount + fastingLowCount;
+  // 最低值（任一窗），用來判斷嚴重度
+  const lowVals = [...nightLows, ...fastingLows].map(r => r.value);
+  const minLow  = lowVals.length ? Math.min(...lowVals) : null;
+  const severeLow = minLow != null && minLow < 54; // 臨床嚴重低血糖門檻
+
   const sample = overnight.length >= 5 ? overnight : fasting;
   const avgBG = sample.reduce((s, r) => s + r.value, 0) / sample.length;
-  const lowCount  = sample.filter(r => r.value < 70).length;
-  const highCount = sample.filter(r => r.value > 140).length;
-  const lowRatio  = lowCount / sample.length;
-  const highRatio = highCount / sample.length;
 
   const avgFasting = fasting.length
     ? fasting.reduce((s, r) => s + r.value, 0) / fasting.length
     : null;
 
-  if (lowRatio >= 0.2 || avgBG < 72) {
+  // 只要夜間或空腹出現任何一次低血糖，就請使用者考慮降低長效劑量。
+  if (totalLowCount >= 1) {
+    const where = [
+      nightLowCount   ? `夜間 ${nightLowCount} 次` : null,
+      fastingLowCount ? `空腹 ${fastingLowCount} 次` : null,
+    ].filter(Boolean).join('、');
+    // 嚴重（<54）或反覆（≥2 次）→ danger；單次→ warning
+    const severity = (severeLow || totalLowCount >= 2) ? 'danger' : 'warning';
+    const reduceU = (severeLow || totalLowCount >= 3) ? '2' : '1–2';
     return {
       status: 'too_high',
-      severity: 'danger',
+      severity,
       avgBG: Math.round(avgBG),
       avgFasting: avgFasting ? Math.round(avgFasting) : null,
-      lowCount, sampleSize: sample.length, avgLongDose,
-      message: `夜間低血糖偏多（${lowCount}/${sample.length} 次低於 70 mg/dL），長效劑量可能過高`,
-      suggestion: '建議減少長效胰島素 1–2 U，並與醫師討論',
+      lowCount: totalLowCount,
+      nightLowCount, fastingLowCount,
+      minLow,
+      sampleSize: sample.length,
+      avgLongDose,
+      reduceDose: true,
+      message: `${where}出現低血糖（最低 ${minLow} mg/dL）${severeLow ? '，含嚴重低血糖（＜54）' : ''}，長效（基礎）劑量可能過高`,
+      suggestion: `建議減少長效胰島素 ${reduceU} U${avgLongDose ? `（目前約 ${avgLongDose.toFixed(1)} U／次）` : ''}，並與醫師或衛教師確認後調整。低血糖時請先補充速效糖。`,
     };
   }
+
   if (avgBG > 150 || (avgFasting && avgFasting > 140)) {
     return {
       status: 'too_low',
