@@ -79,6 +79,12 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `VAPID_PRIVATE_KEY=JTegyOtbQfq1O9rJ8IJ6D6gTp1SHN9EIx3JWbyfuMtg`
 - `VAPID_SUBJECT=mailto:wuborjenn@gmail.com`
 
+### UI 調整批次（4 項）
+- `src/App.css`：`.timeline-header` 加 `flex-wrap`、`.timeline-legend` 換行 → 圖例不壓標題；`.ev-chip-tri span` 白底 + `.ev-chip-circle` 白邊 → 標記密集不重疊。
+- `src/components/Settings.jsx`：`withNone()` 在速效/短效/長效品牌選單各加「無／不使用此類」。
+- `src/components/Profile.jsx`：年齡欄改「出生年月日」date 欄，`computeAge()` 自動算齡並同步 `form.age`（下游 dietaryAdvisor/reportGenerator/checkDataSufficiency 讀 age 不動）；舊資料只有 age 仍相容。
+- `src/components/GlucoseLog.jsx`：急速升降 / 血糖事件原因分析各預設只列 3 筆（`PREVIEW_N`），>3 筆顯示「顯示更多／收合」按鈕。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）

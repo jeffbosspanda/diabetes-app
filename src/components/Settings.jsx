@@ -86,6 +86,10 @@ export default function Settings() {
 
   const [reportDays, setReportDays] = useState(14);
 
+  // Append a「無」(none) option so users who don't use a given insulin type can say so.
+  const NONE = { name: '無', company: '不使用此類' };
+  const withNone = (arr) => [...arr, NONE];
+
   const clearData = (type) => {
     if (!window.confirm(`確定要永久清除所有${type}紀錄？此操作無法復原。`)) return;
     if (type === '血糖') dispatch({ type: 'LOAD_STATE', payload: { glucoseReadings: [] } });
@@ -112,7 +116,7 @@ export default function Settings() {
         <BrandSelector
           label="⚡ 速效 / 超速效（analog，餐前 0–15 分鐘）"
           colorClass="rapid-label"
-          brands={INSULIN_BRANDS.rapid}
+          brands={withNone(INSULIN_BRANDS.rapid)}
           confirmed={s.rapidBrandConfirmed}
           selectedBrand={s.rapidBrandConfirmed ? s.rapidBrand : pendingRapid}
           onSelect={setPendingRapid}
@@ -123,7 +127,7 @@ export default function Settings() {
         <BrandSelector
           label="🕒 短效（一般人胰島素 Regular，餐前 30 分鐘）"
           colorClass="short-label"
-          brands={INSULIN_BRANDS.short}
+          brands={withNone(INSULIN_BRANDS.short)}
           confirmed={s.shortBrandConfirmed}
           selectedBrand={s.shortBrandConfirmed ? s.shortBrand : pendingShort}
           onSelect={setPendingShort}
@@ -134,7 +138,7 @@ export default function Settings() {
         <BrandSelector
           label="🌙 長效 / 超長效（基礎注射）"
           colorClass="long-label"
-          brands={INSULIN_BRANDS.long}
+          brands={withNone(INSULIN_BRANDS.long)}
           confirmed={s.longBrandConfirmed}
           selectedBrand={s.longBrandConfirmed ? s.longBrand : pendingLong}
           onSelect={setPendingLong}

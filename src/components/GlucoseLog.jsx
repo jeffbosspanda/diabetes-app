@@ -12,6 +12,9 @@ export default function GlucoseLog() {
   const { state, dispatch } = useApp();
   const [form, setForm] = useState({ value: '', mealContext: 'fasting', notes: '' });
   const [showForm, setShowForm] = useState(false);
+  const [showAllExcursions, setShowAllExcursions] = useState(false);
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const PREVIEW_N = 3;
   const todayStr = fmtD(new Date());
   const [fromDate, setFromDate] = useState(fmtD(subDays(new Date(), 7)));
   const [toDate, setToDate]     = useState(todayStr);
@@ -234,7 +237,7 @@ export default function GlucoseLog() {
             系統找出每段血糖急速變化（≥2 mg/dL/分、變化 ≥30 mg/dL），依事件前的飲食、速效/短效注射與運動推測原因，僅供參考。
           </p>
 
-          {excursionAnalysis.excursions.map((ex, i) => {
+          {(showAllExcursions ? excursionAnalysis.excursions : excursionAnalysis.excursions.slice(0, PREVIEW_N)).map((ex, i) => {
             const isRise = ex.dir === 'rise';
             return (
               <div key={i} className={`ea-event ea-${isRise ? 'hyper' : 'hypo'}`}>
@@ -271,6 +274,13 @@ export default function GlucoseLog() {
             );
           })}
 
+          {excursionAnalysis.excursions.length > PREVIEW_N && (
+            <button className="btn-secondary full-width" style={{ marginTop: 4 }}
+              onClick={() => setShowAllExcursions(v => !v)}>
+              {showAllExcursions ? '收合' : `顯示更多（共 ${excursionAnalysis.excursions.length} 筆）`}
+            </button>
+          )}
+
           <div className="basal-disclaimer" style={{ marginTop: 8 }}>
             以上為系統自動分析，任何劑量調整請先諮詢醫師或衛教師。
           </div>
@@ -291,7 +301,7 @@ export default function GlucoseLog() {
             系統依事件前的飲食、長/短效注射劑量與時間推測可能原因，僅供參考。
           </p>
 
-          {eventAnalysis.events.map((ev, i) => {
+          {(showAllEvents ? eventAnalysis.events : eventAnalysis.events.slice(0, PREVIEW_N)).map((ev, i) => {
             const isHypo = ev.kind === 'hypo';
             return (
               <div key={i} className={`ea-event ea-${ev.kind}`}>
@@ -327,6 +337,13 @@ export default function GlucoseLog() {
               </div>
             );
           })}
+
+          {eventAnalysis.events.length > PREVIEW_N && (
+            <button className="btn-secondary full-width" style={{ marginTop: 4 }}
+              onClick={() => setShowAllEvents(v => !v)}>
+              {showAllEvents ? '收合' : `顯示更多（共 ${eventAnalysis.events.length} 筆）`}
+            </button>
+          )}
 
           <div className="basal-disclaimer" style={{ marginTop: 8 }}>
             以上為系統自動分析，任何劑量調整請先諮詢醫師或衛教師。

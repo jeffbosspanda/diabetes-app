@@ -556,7 +556,7 @@ textarea { resize: vertical; }
 }
 
 .timeline-card { padding: 14px 12px 8px; }
-.timeline-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.timeline-header { display: flex; align-items: center; justify-content: space-between; gap: 4px 10px; flex-wrap: wrap; margin-bottom: 6px; }
 
 /* ── Day navigator ── */
 .day-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -600,13 +600,18 @@ textarea { resize: vertical; }
   width: 18px; height: 18px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 8px; font-weight: 700; color: #fff;
+  border: 1.5px solid #fff; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.12);
 }
 .ev-chip-tri {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   font-size: 8px; font-weight: 700; line-height: 1;
 }
+/* readable unit label even when chips cluster: white pill behind the text */
+.ev-chip-tri span {
+  background: rgba(255,255,255,0.85); border-radius: 4px; padding: 0 2px;
+}
 .timeline-header h3 { font-size: 13px; }
-.timeline-legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.timeline-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; font-size: 11px; color: var(--text-muted); }
 .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
 
 .timeline-empty {

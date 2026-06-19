@@ -5,13 +5,28 @@ import { User, Save, AlertCircle } from 'lucide-react';
 export default function Profile() {
   const { state, dispatch } = useApp();
   const [form, setForm] = useState(state.profile || {
-    name: '', age: '', gender: '', weight: '', height: '',
+    name: '', birthDate: '', age: '', gender: '', weight: '', height: '',
     bodyFat: '', muscleMass: '', diabetesType: 'type1',
     diagnosedYear: '', tdd: '', notes: '',
   });
   const [saved, setSaved] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Age is derived from birth date; keep form.age in sync so all downstream
+  // calculations (劑量建議 / 報告) that read profile.age keep working.
+  const computeAge = (birthDate) => {
+    if (!birthDate) return '';
+    const b = new Date(birthDate);
+    if (isNaN(b)) return '';
+    const now = new Date();
+    let a = now.getFullYear() - b.getFullYear();
+    const m = now.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
+    return a >= 0 && a < 130 ? String(a) : '';
+  };
+  const setBirthDate = (v) => setForm(f => ({ ...f, birthDate: v, age: computeAge(v) }));
+  const displayAge = form.age || computeAge(form.birthDate);
 
   const handleSave = () => {
     dispatch({ type: 'SET_PROFILE', payload: { ...form, updatedAt: new Date().toISOString() } });
@@ -43,8 +58,9 @@ export default function Profile() {
             <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="輸入姓名" />
           </div>
           <div className="form-group">
-            <label>年齡</label>
-            <input type="number" value={form.age} onChange={e => set('age', e.target.value)} placeholder="歲" />
+            <label>出生年月日{displayAge !== '' ? `（${displayAge} 歲）` : ''}</label>
+            <input type="date" value={form.birthDate || ''} max={new Date().toISOString().slice(0, 10)}
+              onChange={e => setBirthDate(e.target.value)} />
           </div>
           <div className="form-group">
             <label>性別</label>
