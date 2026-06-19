@@ -2,62 +2,89 @@
 
 存檔時間：2026-06-19
 
-## 目前任務
+## 本輪任務：上線到雲端 + 多人帳號 + 自動同步
 
-本輪完成三項需求（全部已實作並驗證）：
+把 DiaGuide 從「本機 localStorage 單機 App」變成「別人手機可用、可雲端持久、每人各自帳號、後端自動同步血糖」的線上系統。
 
-1. **合併飲食卡** — 「飲食建議」併入「營養素分析與建議」，移除重複卡片
-2. **急速升降原因分析（新功能）** — 分析每段血糖急升/急降的原因
-3. **速效 / 短效分清楚** — 新增獨立短效（Regular）品牌類別，與速效 analog 區分
+部署網址：https://diaguide-4r5o.onrender.com
+GitHub：https://github.com/jeffbosspanda/diabetes-app（branch main）
+Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.co）
 
-## 已修改檔案
+## 架構
 
-### 需求 1：合併飲食卡
-- `src/components/MealLog.jsx` — 兩張卡（營養素分析與建議＋飲食建議）合併成一張，render `nutrientAdvice` 後接 `dietaryTips`；移除未用的 `Info` import
+- **單一 Node 服務**：Express（`server/libre-proxy.js`）同時供前端靜態檔（`dist/`）+ `/api/*`，部署在 Render free。
+- **前端**：Vite/React SPA，`/api/...` 同源呼叫後端。
+- **登入 + 雲端儲存**：Supabase Auth（email 註冊/登入/重設）+ Postgres 表 `app_state`（每人一列 JSONB，RLS 保護）。
+- **血糖來源**：LibreLinkUp（follower 帳密）經後端 proxy 抓取。
+- **自動同步**：後端排程（`/api/cron/sync-all`）+ 外部 cron-job.org 每 6h 觸發。
 
-### 需求 2：急速升降原因分析
-- `src/utils/insulinCalculator.js` — 新增 `analyzeGlucoseExcursions()` ＋ `analyzeOneExcursion()`：
-  - 偵測連續血糖陡段（≥2 mg/dL/分起始、≥1 延續、間隔≤30min），同方向合併成一段 excursion，累積變化≥30 mg/dL 才列入
-  - 對照事件前 3h 的飲食、速效/短效注射、長效、運動推因
-  - 急升因：高GI食物、進食未打餐前胰島素、劑量相對碳水不足、注射過晚、黎明現象
-  - 急降因：餐前胰島素作用中、劑量疊加(stacking)、運動增敏、劑量相對碳水偏高
-- `src/components/GlucoseLog.jsx` — import `analyzeGlucoseExcursions`、加 `excursionAnalysis` useMemo、「血糖變化速率」卡下方新增「急速升降原因分析」卡
+## 已修改 / 新增檔案
 
-### 需求 3：速效 / 短效分類
-- `src/utils/insulinCalculator.js`：
-  - `INSULIN_BRANDS.short` 新增（Humulin R / Actrapid / Novolin R / Insuman Rapid）
-  - `BRAND_PHARMA` 加短效各品牌項（kind:'short', prebolus:30, iobHours:7-8）
-  - 新增 helper：`BOLUS_TYPES`、`isBolus()`、`bolusLabel()`、`bolusIOBHours()`
-  - 餐前胰島素分析（`analyzeRapidDosingHistory`、`analyzeOneEvent`）filter 改 `isBolus()`；文字「短效」→「餐前胰島素」（特定單筆用 `bolusLabel`）
-- `src/store/AppContext.jsx` — settings 加 `shortBrand:'Humulin R'`、`shortBrandConfirmed:false`
-- `src/components/Settings.jsx` — 第三個 BrandSelector（短效）；修正速效標籤；加 short pending/confirm/change handlers；BrandSelector active class 支援 short
-- `src/components/InsulinAdvisor.jsx` — `shortBrand` + `brandFor()` 對應；手動記錄與編輯改 3 分頁（速效/短效/長效）；confirmed-brand-bar 加短效 tag；紀錄列徽章 3 類（速效/短效/長效）；ICR/ISF/分析文字「短效」→「餐前胰島素」
-- `src/utils/bgPredictor.js` — IOB 迴圈納入短效，依 brandType 設 DIA（短效 360min、速效 240min）
-- `src/utils/insulinReminder.js` — 餐後未打覆蓋檢查納入 short
-- `src/utils/reportGenerator.js` — 拆速效/短效統計列；事件列與標題「短效」→「餐前胰島素」
-- `src/components/Dashboard.jsx` — 加 `SHORT_COLOR`(#0ea5e9 天藍)、`insulinColor()`/`insulinTypeLabel()` helper；時間軸標記/連線/事件列/圖例 3 類
-- `src/App.css` — 追加 `.short-label`/`.short-active`/`.short-tag`/`.inject-tab.active-short`/`.active-short` 樣式
+### 部署
+- `server/libre-proxy.js`：供 `dist/` 靜態檔 + SPA fallback；用 `process.env.PORT`；`/api/analyze-food` 加 `ACCESS_KEY` 守門。
+- `package.json`：加 `start` script、`engines.node>=20`。
+- `render.yaml`（新）：Blueprint，列出所有環境變數。
 
-## 待辦事項
+### 登入 + 雲端
+- `src/lib/supabase.js`（新）：建 client；**正規化 URL**（去尾斜線 + 去誤貼的 `/rest/v1`、`/auth/v1` 等子路徑）。
+- `src/store/AuthContext.jsx`（新）：session 管理（signUp/signIn/signOut/resetPassword）。
+- `src/components/Auth.jsx`（新）：登入/註冊/忘記密碼畫面，Supabase 錯誤中文化。
+- `src/store/AppContext.jsx`：改成綁登入用戶讀寫雲端 `app_state`；首次登入把 localStorage 遷移上雲；debounce 800ms 存雲端 + localStorage 快取。
+- `src/App.jsx`：`AuthProvider` 包裹 + `Gate` 登入閘；header 加登出鈕。
+- `src/App.css`：auth 畫面樣式。
+- `supabase-setup.sql`（新）：建 `app_state` 表 + RLS policies（select/insert/update own row）。
 
-- 無未完成項目。三項需求皆已完成並通過驗證。
-- 可選後續：劑量計算器目前固定用速效品牌計時機，若使用者主用短效可加品牌切換；短效注射的注射時機卡（餐前30分鐘提醒）。
+### 血糖時間戳修正
+- `server/libre-proxy.js`：`parseLibreUTC()` 以 UTC 明確解析 LibreLink 的 `FactoryTimestamp`（UTC），取代 `new Date(Timestamp)`（會被伺服器時區誤判）。
+
+### LibreView 限流處理
+- `server/libre-proxy.js`：`libreFetch()` 遇 429 退避重試一次（上限 6 秒）；快取 patientId 省 `/connections` 呼叫；**每帳號讀取快取**（60s 內不重打）+ **限流/錯誤時回傳上一筆好資料**（最長 30 分鐘）。
+
+### 資料遺失 bug 修正
+- `src/store/AppContext.jsx`：`LOAD_STATE` 改回 `{...state, ...payload}`（合併），先前誤改成 `{...initialState, ...payload}` 導致「清除血糖」連帶清掉飲食/注射。
+
+### 伺服器排程同步（90 天累積）
+- `server/libre-proxy.js`：
+  - `supabaseAdmin`（service_role，繞 RLS）。
+  - `mergeGlucose()`：合併去重 + 裁掉 `RETAIN_DAYS=90` 天前。
+  - `syncOneUser()` / `syncAllUsers()`：跑遍所有 `app_state`，取各人 `settings.libreCredentials` 同步、合併、寫回；用戶間隔 3 秒。
+  - `POST/GET /api/cron/sync-all`：`CRON_SECRET` 守門（header `x-cron-secret` 或 `?key=`）；區分「未設定」vs「key 不符」。
+  - 內建 6h `setInterval`（best-effort；免費版會休眠，靠外部 cron 才可靠）。
+- `render.yaml`：加 `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`CRON_SECRET`。
+
+## Render 環境變數（在 Dashboard 設，勿進版控）
+
+- `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）
+- `ACCESS_KEY`（食物端點守門）
+- `VITE_SUPABASE_URL` = https://submadhgvbiblcurnktt.supabase.co（**build 時**注入前端）
+- `VITE_SUPABASE_ANON_KEY` = anon/publishable key（可公開）
+- `SUPABASE_URL` = 同上（**後端執行時**讀，與 VITE_ 那個是不同變數，兩個都要）
+- `SUPABASE_SERVICE_ROLE_KEY` = service_role 金鑰（機密！繞 RLS）
+- `CRON_SECRET` = `3Qeeq9GHC2iPn41ZgWDUkHc7gnkNv7Vd`
+
+本機 `.env` 另有 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`（已 gitignore）供 `npm run dev` 用。
 
 ## 測試指令與結果
 
-- `npm run build` → `✓ built in ~894ms`，無錯誤（僅既有 chunk >500kB 警告）
-- preview 實測（localhost:5173）：
-  - 設定頁 3 個品牌類別標籤：「⚡ 速效…」「🕒 短效（一般人胰島素 Regular，餐前 30 分鐘）」「🌙 長效…」✓
-  - 劑量頁手動記錄 3 分頁：速效（NovoRapid）/ 短效（Humulin R）/ 長效（Tresiba）✓
-  - 血糖頁「急速升降原因分析」卡正常：例「急速下降 145→67 mg/dL（-78）」、cause「速效胰島素作用中，下降前 42 分鐘注射 9U 速效，正值作用高峰」✓
-  - 無 console error
+- `npm run build` → 通過（僅既有 chunk >500kB 警告）。
+- 線上驗證（curl）：health 200；`/api/cron/sync-all`（帶 key）→ `{"users":1,"synced":1,"added":0,"errors":[]}`（added:0 因前端剛同步過，無新資料，正常）。
+- 時間戳：診斷實測 `FactoryTimestamp 9:06AM(UTC)` → `parsedISO 09:06Z` → 台灣瀏覽器顯示「下午5:06」✓，與手機 LibreLink 一致。
+- 一次同步實測：45 筆 / 跨 11.3 小時（證實 LibreLinkUp graph 只回 ~12h）。
+
+## 待辦 / 待確認
+
+- 使用者需在 cron-job.org 建好每 6h 排程打 `/api/cron/sync-all?key=...`（外部觸發，喚醒 + 觸發）。**待使用者確認 History 顯示 HTTP 200。**
+- 食物辨識前端 UI 尚未接（後端 `/api/analyze-food` 已就緒，需傳 `x-access-key` header）。
 
 ## 踩坑點
 
-- **嚴禁修改血糖資料**：血糖只能經 LibreLink sync（`npm run proxy`，localhost:3001）匯入；勿注入/編輯 localStorage `diabetesApp.glucoseReadings`。僅信任 `source: 'FreeStyleLibre'`。
-- 速效（rapid analog）≠ 短效（Regular / R）：速效餐前 0–15min、IOB≈4h；短效餐前 30min、IOB≈7h、DIA≈6h。兩者每單位降糖力相同，ICR/ISF 計算一致，差別只在時機與 IOB 持續。
-- `brandType` 現有三值：`'rapid'`（速效）、`'short'`（短效）、`'long'`（長效）。餐前胰島素分析一律用 `isBolus()` = rapid OR short。
-- 舊 `brandType:'rapid'` 紀錄不受影響，仍歸速效；舊資料無 `short`。
-- excursion 偵測門檻：STEEP_RATE=2、CONT_RATE=1、SEG_GAP=30min、MIN_DELTA=30 mg/dL；最多顯示 12 段。
-- 此專案目錄非 git repo（`git status` 會 fatal），存檔靠手動整理。
-- preview 切路由用 `history.pushState` + `popstate` 事件較穩（`location.href` 偶爾回跳）。
+- **嚴禁修改血糖資料**：只能經 LibreLink sync 進來；勿注入/編輯。清除後重新同步是合法修正（資料源頭不動）。
+- **LibreLinkUp graph 只回 ~12 小時**，無 90 天端點。90 天靠「持續累積」：後端排程每 6h 同步、12h 視窗重疊、不裁切（除 90 天前）→ 自然累積。前端觸發不可靠（App 沒開就斷），故需後端排程。
+- **時區**：LibreLink `Timestamp` 是帳號當地時間字串（無時區）；`FactoryTimestamp` 是 UTC。務必用 `FactoryTimestamp` 並以 `Date.UTC` 解析，否則 Render（UTC）會整批偏 +8h。
+- **VITE_ 變數 build 時注入**：改了要重建才生效；`SUPABASE_URL`（runtime）與 `VITE_SUPABASE_URL`（build）是兩個不同變數。
+- **Supabase URL 別貼成 `.../rest/v1`**：會造成 `invalid path specified in request URL`。`src/lib/supabase.js` 已自動清子路徑防呆。
+- **service_role 金鑰機密**：只放後端 env，繞過 RLS，絕不外洩、絕不進前端 bundle。
+- **Render free 會休眠**（閒置 15 分），首次喚醒慢 ~30s；in-process timer 不可靠，靠外部 cron。
+- **`LOAD_STATE` 必須是合併語意**（`{...state, ...payload}`），Settings 的「清除單項」依賴它做局部清除；改成重置會清掉其他資料（已踩過，造成飲食/注射遺失）。
+- **資料遺失教訓**：目前無完整備份機制（使用者選擇不加）。誤清後雲端 + 本機都會被空狀態覆蓋，手動紀錄不可救。
+- **此專案現在是 git repo**（main → GitHub jeffbosspanda/diabetes-app）；`git push` 觸發 Render 自動重部署 = 更新方式。
