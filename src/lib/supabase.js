@@ -2,9 +2,13 @@ import { createClient } from '@supabase/supabase-js';
 
 // Public anon key — safe to ship to the browser; row-level security in the
 // database is what actually protects each user's data.
-// trim whitespace + trailing slash — a stray slash makes Supabase's gateway
-// return "invalid path specified in request URL"
-const url = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, '');
+// Normalize the project URL. People often paste the REST/auth sub-path
+// (".../rest/v1") by mistake — supabase-js appends its own path, so any
+// suffix here produces "invalid path specified in request URL". Strip it.
+const url = import.meta.env.VITE_SUPABASE_URL
+  ?.trim()
+  .replace(/\/(rest|auth|storage|realtime|functions)\/v\d+\/?$/i, '')
+  .replace(/\/+$/, '');
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
 export const supabaseUrl = url || '';
