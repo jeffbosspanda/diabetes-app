@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare } from 'lucide-react';
+import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle } from 'lucide-react';
 import { INSULIN_BRANDS } from '../utils/insulinCalculator';
 import { openReport } from '../utils/reportGenerator';
 import LibreSync from './LibreSync';
@@ -209,6 +209,26 @@ export default function Settings() {
           <button className="btn-danger btn-danger-all" onClick={() => clearData('全部')}>
             <Trash2 size={14} /> 清除全部資料
           </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3><HelpCircle size={16} /> 常見問題 Q&A</h3>
+        <div className="qa-list">
+          {[
+            { q: '血糖資料怎麼來？可以手動修改嗎？', a: '血糖只能透過 LibreLink 自動同步進來，系統不會也不允許手動竄改血糖數值。若資料有誤，請重新同步；同步來源（感測器）才是正確值。' },
+            { q: '為什麼要連接 LibreLinkUp？和 LibreLink 一樣嗎？', a: '請使用「LibreLinkUp」(追蹤者) 帳號，非感測器本機的「LibreLink」App。連接後系統會自動抓取血糖，背景每約 6 小時也會同步累積，最長保留 90 天。' },
+            { q: '劑量建議準確嗎？可以照著打嗎？', a: '建議值由 ICR／ISF、餐點碳水、餐前血糖與運動推算，僅供參考。系統也會依你的實際餐後反應提出參數修正建議。任何劑量調整務必先諮詢醫師或衛教師。' },
+            { q: 'ICR / ISF 是什麼？', a: 'ICR（碳水比）= 每 1 U 餐前胰島素可覆蓋多少克碳水；ISF（敏感度）= 1 U 可使血糖下降多少 mg/dL。可在「劑量」頁查看與手動調整。' },
+            { q: '手機推播收不到怎麼辦？', a: 'iPhone 需先用 Safari 將本 App「加入主畫面」，再從主畫面開啟並到「提醒」頁啟用；Android 用 Chrome 可直接啟用。高低血糖警報於背景同步時檢查（約每 6 小時），非即時連續監測。' },
+            { q: '出生年月日要填嗎？', a: '填寫後系統會自動換算年齡，用於胰島素需求估算。年齡、體重等基本資料越完整，劑量建議越準確。' },
+            { q: '資料安全嗎？換手機資料會在嗎？', a: '資料以你的帳號儲存在雲端（受 RLS 保護），換裝置登入同一帳號即可看到。建議定期用「設定 → 數據報告」匯出 PDF 備份。' },
+          ].map((item, i) => (
+            <details key={i} className="qa-item">
+              <summary className="qa-q">{item.q}</summary>
+              <p className="qa-a">{item.a}</p>
+            </details>
+          ))}
         </div>
       </div>
 

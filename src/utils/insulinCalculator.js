@@ -100,43 +100,95 @@ export function deriveICRandISF(tdd, bgUnit = 'mg/dL') {
 }
 
 // Adaptive ICR/ISF adjustment based on post-meal BG response
+// Back-calculate the carb ratio (ICR) each clean meal implies, then aggregate.
+//
+// Model (everything in mg/dL): a meal's carbs raise BG by carbs·(ISF/ICR); the
+// bolus lowers it by dose·ISF. If the bolus had instead landed BG on target, the
+// "correct" dose would be carbs/ICR_true + (preBG−target)/ISF. The 2-hour
+// residual (postBG−target)/ISF is exactly how many units the actual dose was off
+// by, so:
+//     carbs / ICR_true = dose + (postBG − preBG)/ISF
+//     ICR_true        = carbs / ( dose + (postBG − preBG)/ISF )
+//
+// This explicitly uses BOTH the meal carbs (飲食) and the insulin dose (胰島素).
+// To keep estimates honest we drop confounded pairs:
+//   • another rapid/short bolus between the meal and the post reading (IOB 疊加)
+//   • a second meal in the post-meal window (extra carbs)
+//   • high-fat / high-protein meals — their BG peak is delayed past 2h, so a 2h
+//     reading understates the rise (飲食消化速度)
+//   • very-low-carb meals — ICR estimate is dominated by noise
+// Returns { icr, isf, n } where n = clean pairs used.
 export function adaptICRandISF(meals, glucoseReadings, insulinLogs, currentICR, currentISF) {
-  if (!currentICR || !currentISF) return { icr: currentICR, isf: currentISF };
-  const paired = [];
-  for (const meal of meals) {
-    if (!meal.carbs || !meal.preMealBG) continue;
-    const mealTime = new Date(meal.timestamp).getTime();
-    // Find insulin dose around meal time (±30min)
-    const dose = insulinLogs.find(l =>
-      Math.abs(new Date(l.timestamp).getTime() - mealTime) < 30 * 60 * 1000
-    );
-    if (!dose) continue;
-    // Find post-meal BG 2h later
-    const postBG = glucoseReadings.find(r =>
-      new Date(r.timestamp).getTime() > mealTime + 90 * 60 * 1000 &&
-      new Date(r.timestamp).getTime() < mealTime + 180 * 60 * 1000
-    );
-    if (!postBG) continue;
-    paired.push({ carbs: meal.carbs, preBG: meal.preMealBG, postBG: postBG.value, dose: dose.units });
-  }
-  if (paired.length < 3) return { icr: currentICR, isf: currentISF };
+  if (!currentICR || !currentISF) return { icr: currentICR, isf: currentISF, n: 0 };
 
-  // Simple regression: expected vs actual BG rise
-  let icrAdj = 0, count = 0;
-  for (const p of paired) {
-    const expectedDrop = p.dose * currentISF;
-    const actualDrop = p.preBG - p.postBG;
-    const netCarbEffect = p.carbs / currentICR - p.dose;
-    if (Math.abs(netCarbEffect) > 0.1) {
-      icrAdj += (actualDrop - expectedDrop) / netCarbEffect;
-      count++;
-    }
+  const POST_LO = 90 * 60 * 1000;   // 1.5h
+  const POST_HI = 180 * 60 * 1000;  // 3h
+  const isBolusLog = (l) => l.brandType === 'rapid' || l.brandType === 'short';
+
+  const estimates = [];
+  for (const meal of meals) {
+    if (!meal.carbs || meal.carbs < 15) continue;            // 食物：低碳水雜訊大
+    if (!meal.preMealBG) continue;
+    if ((meal.fat ?? 0) >= 20 || (meal.protein ?? 0) >= 25) continue; // 食物：延遲消化餐排除
+    const mealTime = new Date(meal.timestamp).getTime();
+
+    // The meal's own bolus (±30min, prefer the closest).
+    const dose = insulinLogs
+      .filter(l => isBolusLog(l) && Math.abs(new Date(l.timestamp).getTime() - mealTime) < 30 * 60 * 1000)
+      .sort((a, b) => Math.abs(new Date(a.timestamp) - mealTime) - Math.abs(new Date(b.timestamp) - mealTime))[0];
+    if (!dose || !dose.units) continue;
+
+    // Post-meal reading 1.5–3h out (closest to 2h).
+    const postBG = glucoseReadings
+      .filter(r => {
+        const t = new Date(r.timestamp).getTime();
+        return t > mealTime + POST_LO && t < mealTime + POST_HI;
+      })
+      .sort((a, b) =>
+        Math.abs(new Date(a.timestamp).getTime() - (mealTime + 2 * 3600 * 1000)) -
+        Math.abs(new Date(b.timestamp).getTime() - (mealTime + 2 * 3600 * 1000)))[0];
+    if (!postBG) continue;
+
+    // 胰島素：reject if another bolus stacked between meal and post reading (IOB confound).
+    const postT = new Date(postBG.timestamp).getTime();
+    const stacked = insulinLogs.some(l =>
+      isBolusLog(l) && l !== dose &&
+      new Date(l.timestamp).getTime() > mealTime + 30 * 60 * 1000 &&
+      new Date(l.timestamp).getTime() < postT
+    );
+    if (stacked) continue;
+
+    // 食物：reject if a second meal added carbs inside the window.
+    const extraMeal = meals.some(m =>
+      m !== meal && m.carbs &&
+      new Date(m.timestamp).getTime() > mealTime + 20 * 60 * 1000 &&
+      new Date(m.timestamp).getTime() < postT
+    );
+    if (extraMeal) continue;
+
+    const denom = dose.units + (postBG.value - meal.preMealBG) / currentISF;
+    if (denom <= 0.5) continue; // implausible / net-negative carb coverage
+    const icrEst = meal.carbs / denom;
+    if (icrEst < 3 || icrEst > 40) continue; // discard outliers
+    estimates.push(icrEst);
   }
-  if (count === 0) return { icr: currentICR, isf: currentISF };
-  const adjFactor = 1 + (icrAdj / count) * 0.1;
+
+  if (estimates.length < 3) return { icr: currentICR, isf: currentISF, n: estimates.length };
+
+  // Robust aggregate: median of per-meal estimates.
+  estimates.sort((a, b) => a - b);
+  const mid = Math.floor(estimates.length / 2);
+  const median = estimates.length % 2
+    ? estimates[mid]
+    : (estimates[mid - 1] + estimates[mid]) / 2;
+
+  // Safety: damp toward current and cap the per-proposal change to ±20%.
+  const damped = currentICR + (median - currentICR) * 0.5;
+  const capped = Math.max(currentICR * 0.8, Math.min(currentICR * 1.2, damped));
   return {
-    icr: Math.max(5, Math.min(30, Math.round(currentICR * adjFactor))),
+    icr: Math.max(5, Math.min(30, Math.round(capped))),
     isf: currentISF,
+    n: estimates.length,
   };
 }
 
@@ -255,19 +307,21 @@ export function recommendDose({
 // suggests. Returns a proposal the UI can ask the user to approve.
 export function proposeICRCorrection(meals, glucoseReadings, insulinLogs, activeICR, activeISF) {
   if (!activeICR || !activeISF) return { suggested: false };
-  const { icr: suggestedICR } = adaptICRandISF(meals, glucoseReadings, insulinLogs, activeICR, activeISF);
+  const { icr: suggestedICR, n } = adaptICRandISF(meals, glucoseReadings, insulinLogs, activeICR, activeISF);
   const delta = suggestedICR - activeICR;
-  if (Math.abs(delta) < 1) return { suggested: false, activeICR, suggestedICR };
+  // Require a meaningful change AND enough clean meal-insulin-BG pairs to trust it.
+  if (n < 3 || Math.abs(delta) < 1) return { suggested: false, activeICR, suggestedICR, n };
   return {
     suggested: true,
     activeICR,
     suggestedICR,
     delta,
+    n,
     direction: delta > 0 ? 'looser' : 'tighter',
     // looser ICR (bigger number) = less insulin per carb → fixes post-meal lows
     reason: delta > 0
-      ? '近期餐後血糖偏低，系統建議「放寬」碳水比（每 U 覆蓋更多碳水，劑量略降）'
-      : '近期餐後血糖偏高，系統建議「收緊」碳水比（每 U 覆蓋較少碳水，劑量略增）',
+      ? `近 ${n} 餐「碳水＋對應注射」分析顯示餐後血糖偏低，建議「放寬」碳水比（每 U 覆蓋更多碳水，劑量略降）`
+      : `近 ${n} 餐「碳水＋對應注射」分析顯示餐後血糖偏高，建議「收緊」碳水比（每 U 覆蓋較少碳水，劑量略增）`,
   };
 }
 

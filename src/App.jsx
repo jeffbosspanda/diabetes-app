@@ -11,6 +11,7 @@ import InsulinAdvisor from './components/InsulinAdvisor';
 import Reminders from './components/Reminders';
 import Settings from './components/Settings';
 import Achievements from './components/Achievements';
+import Onboarding from './components/Onboarding';
 import { findMealsNeedingInsulin, buildInsulinReminderMessage } from './utils/insulinReminder';
 import { LayoutDashboard, Activity, Utensils, Syringe, Bell, Settings as Gear, X, LogOut } from 'lucide-react';
 import { supabaseReady } from './lib/supabase';
@@ -79,6 +80,7 @@ function Layout() {
       </header>
 
       <InsulinReminderBar />
+      <Onboarding />
 
       <main className="app-main">
         <Routes>

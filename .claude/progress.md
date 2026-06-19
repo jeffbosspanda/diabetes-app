@@ -85,6 +85,21 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `src/components/Profile.jsx`：年齡欄改「出生年月日」date 欄，`computeAge()` 自動算齡並同步 `form.age`（下游 dietaryAdvisor/reportGenerator/checkDataSufficiency 讀 age 不動）；舊資料只有 age 仍相容。
 - `src/components/GlucoseLog.jsx`：急速升降 / 血糖事件原因分析各預設只列 3 筆（`PREVIEW_N`），>3 筆顯示「顯示更多／收合」按鈕。
 
+### 新手教學 onboarding
+- `src/components/Onboarding.jsx`（新）：首次登入引導（6 步：歡迎→基本資料→LibreLink→記錄→劑量→區塊總覽），每步有「跳過教學，直接使用」，動作步可直接跳對應頁。
+- 觸發條件：`loaded && !settings.onboardingCompleted && 無 profile/血糖/飲食/注射`（既有用戶不顯示）。完成/跳過 → `UPDATE_SETTINGS {onboardingCompleted:true}` 持久化雲端。
+- `src/App.jsx`：Layout 內掛 `<Onboarding/>`（在 router + AppProvider 內）。
+- `src/App.css`：`.onboard-*` 樣式。
+
+### 參數回歸修正準確化（考量飲食、胰島素）
+- `src/utils/insulinCalculator.js` `adaptICRandISF()` 重寫：用碳水計數反推每餐 ICR `ICR=carbs/(dose+(postBG−preBG)/ISF)`，取中位數，阻尼 50% + 單次變動上限 ±20%。
+  - 排除混淆對：餐後窗內有疊加速效/短效注射（IOB）、窗內第二餐（額外碳水）、高脂(≥20g)/高蛋白(≥25g)延遲消化餐、低碳水(<15g)、離群 ICR。回傳 `n`（乾淨樣本數）。
+- `proposeICRCorrection()`：要求 `n>=3` 才建議；reason 顯示樣本餐數。
+
+### 設定 Q&A
+- `src/components/Settings.jsx`：加「常見問題 Q&A」卡片（7 題 `<details>` 摺疊：血糖來源/LibreLinkUp/劑量準確度/ICR-ISF/推播/出生日/資料安全）。
+- `src/App.css`：`.qa-*` 樣式。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）
