@@ -21,3 +21,13 @@ services:
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
+      # 伺服器排程同步用（後端執行時讀取，勿外洩）：
+      # SUPABASE_URL = 同 VITE_SUPABASE_URL 的專案網址
+      # SUPABASE_SERVICE_ROLE_KEY = Supabase service_role 金鑰（繞過 RLS，機密！）
+      # CRON_SECRET = 自訂長字串，保護 /api/cron/sync-all 端點
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false

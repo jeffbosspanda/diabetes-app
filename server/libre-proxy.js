@@ -5,8 +5,19 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createClient } from '@supabase/supabase-js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Service-role Supabase client for server-side scheduled sync (bypasses RLS).
+// Only created when configured; never expose the service key to the frontend.
+const supabaseAdmin = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    })
+  : null;
+
+const RETAIN_DAYS = 90;
 
 const app = express();
 app.use(cors());
@@ -241,6 +252,86 @@ app.post('/api/libre/sync', async (req, res) => {
 });
 
 app.get('/api/libre/health', (_req, res) => res.json({ ok: true, version: CLIENT_VERSION }));
+
+// ── Server-side scheduled sync ───────────────────────────────────
+// Syncs every user's LibreLink data into their Supabase row on a schedule,
+// independent of whether the client app is open — so the 12h windows always
+// overlap and history accumulates to RETAIN_DAYS with no gaps.
+
+// Merge new readings into existing, dedup by timestamp, drop > RETAIN_DAYS old.
+function mergeGlucose(existing = [], incoming = []) {
+  const seen = new Set(existing.map(r => r.timestamp));
+  const merged = existing.concat(incoming.filter(r => !seen.has(r.timestamp)));
+  const cutoff = Date.now() - RETAIN_DAYS * 24 * 60 * 60 * 1000;
+  return merged.filter(r => new Date(r.timestamp).getTime() >= cutoff);
+}
+
+async function syncOneUser(row) {
+  const data = row.data || {};
+  const creds = data.settings?.libreCredentials;
+  if (!creds?.username || !creds?.password) return { skipped: true };
+
+  const session = await getSession(creds.username, creds.password);
+  const { current, history } = await libre_read(session);
+  const incoming = [current, ...history].filter(Boolean);
+
+  const before = data.glucoseReadings?.length || 0;
+  const glucoseReadings = mergeGlucose(data.glucoseReadings, incoming);
+  const added = glucoseReadings.length - before;
+
+  // Only write when something changed (avoid needless clobber of client writes).
+  if (added !== 0 || glucoseReadings.length !== before) {
+    const { error } = await supabaseAdmin
+      .from('app_state')
+      .update({ data: { ...data, glucoseReadings }, updated_at: new Date().toISOString() })
+      .eq('user_id', row.user_id);
+    if (error) throw new Error(error.message);
+  }
+  return { added, total: glucoseReadings.length };
+}
+
+let cronRunning = false;
+async function syncAllUsers() {
+  if (!supabaseAdmin) { console.warn('[Cron] Supabase service role 未設定，略過'); return { error: 'not configured' }; }
+  if (cronRunning) { console.warn('[Cron] 上一輪仍在執行，略過'); return { busy: true }; }
+  cronRunning = true;
+  const summary = { users: 0, synced: 0, added: 0, errors: [] };
+  try {
+    const { data: rows, error } = await supabaseAdmin.from('app_state').select('user_id, data');
+    if (error) throw new Error(error.message);
+    summary.users = rows.length;
+    for (const row of rows) {
+      try {
+        const r = await syncOneUser(row);
+        if (!r.skipped) { summary.synced++; summary.added += r.added || 0; }
+      } catch (e) {
+        summary.errors.push(`${row.user_id.slice(0, 8)}: ${e.message}`);
+      }
+      await sleep(3000); // space out requests — one shared IP vs LibreView rate limits
+    }
+    console.log('[Cron] 同步完成', JSON.stringify(summary));
+  } finally {
+    cronRunning = false;
+  }
+  return summary;
+}
+
+// Triggered by an external scheduler (e.g. cron-job.org) every ~6h. Guarded by
+// CRON_SECRET via header or ?key= so randoms can't run it.
+app.all('/api/cron/sync-all', async (req, res) => {
+  const secret = req.get('x-cron-secret') || req.query.key;
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const summary = await syncAllUsers();
+  res.json(summary);
+});
+
+// Best-effort in-process timer (fires only while the instance is awake; the
+// external cron is the reliable trigger on Render's sleepy free tier).
+if (supabaseAdmin) {
+  setInterval(() => { syncAllUsers().catch(e => console.error('[Cron]', e.message)); }, 6 * 60 * 60 * 1000);
+}
 
 // ── Food photo analysis ──────────────────────────────────────────
 app.post('/api/analyze-food', async (req, res) => {
