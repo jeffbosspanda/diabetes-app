@@ -2,8 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 
 // Public anon key — safe to ship to the browser; row-level security in the
 // database is what actually protects each user's data.
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// trim whitespace + trailing slash — a stray slash makes Supabase's gateway
+// return "invalid path specified in request URL"
+const url = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, '');
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
 export const supabaseReady = Boolean(url && anonKey);
 
