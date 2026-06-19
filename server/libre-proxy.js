@@ -43,6 +43,27 @@ async function sha256hex(str) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Parse a LibreLink timestamp as UTC, independent of the server's timezone.
+// LibreLink formats: "M/D/YYYY h:mm:ss A" (FactoryTimestamp is UTC). Falls back
+// to Date parsing for ISO strings.
+function parseLibreUTC(str) {
+  if (!str) return new Date().toISOString();
+  const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*([AP]M)?$/i);
+  if (m) {
+    let [, mo, d, y, h, mi, s, ap] = m;
+    h = parseInt(h, 10);
+    if (ap) {
+      const pm = /P/i.test(ap);
+      if (pm && h !== 12) h += 12;
+      if (!pm && h === 12) h = 0;
+    }
+    return new Date(Date.UTC(+y, +mo - 1, +d, h, +mi, +s)).toISOString();
+  }
+  // Unknown format → best-effort (already ISO/with-tz)
+  const dt = new Date(str);
+  return isNaN(dt) ? new Date().toISOString() : dt.toISOString();
+}
+
 // fetch wrapper that retries once on Cloudflare 429 (rate limit) honoring
 // retry_after. Render runs on a shared datacenter IP that LibreView throttles
 // aggressively, so a single polite backoff prevents most transient failures.
@@ -136,7 +157,10 @@ async function libre_read(session) {
 
   const mapReading = (r) => ({
     value: r.Value,
-    timestamp: new Date(r.Timestamp).toISOString(),
+    // FactoryTimestamp is UTC; Timestamp is patient-local. Parse explicitly as
+    // UTC so the result is correct regardless of the server's timezone (Render
+    // runs UTC, a dev laptop may not) — `new Date(str)` would misread it.
+    timestamp: parseLibreUTC(r.FactoryTimestamp || r.Timestamp),
     unit: 'mg/dL',
     mealContext: 'cgm',
     source: 'FreeStyleLibre',
