@@ -3,6 +3,7 @@ import { useApp } from '../store/AppContext';
 import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { parseMealText } from '../utils/foodParser';
+import { classifyGlycemicResponse, classifyMeal } from '../utils/glycemicResponse';
 import ConfirmDialog from './ConfirmDialog';
 import { calcDietaryNeeds, analyzeDailyIntake, getDietaryTips, buildNutrientAdvice, mealNutrientFeedback, VEG_TYPES } from '../utils/dietaryAdvisor';
 import NutrientImpactRanking from './NutrientImpactRanking';
@@ -322,6 +323,15 @@ export default function MealLog() {
                   ))}
                 </div>
               )}
+              {(() => {
+                const g = classifyGlycemicResponse(analysis);
+                return (
+                  <div className="glycemic-box" style={{ borderColor: g.color }}>
+                    <span className="glycemic-badge" style={{ background: g.color }}>{g.emoji} {g.label}</span>
+                    <span className="glycemic-note">{g.note}</span>
+                  </div>
+                );
+              })()}
               {analysis.diabetesNotes && <div className="diabetes-notes">💡 {analysis.diabetesNotes}</div>}
             </div>
           )}
@@ -530,6 +540,7 @@ export default function MealLog() {
                   {m.protein > 0  && <span>蛋白 {m.protein}g</span>}
                   {m.calories > 0 && <span>{m.calories}kcal</span>}
                   {m.preMealBG    && <span>餐前BG {m.preMealBG}</span>}
+                  {m.carbs > 0 && (() => { const g = classifyMeal(m); return <span className="tag-glycemic" style={{ background: g.color }}>{g.emoji} {g.label}</span>; })()}
                   {m.highGI?.length > 0 && <span className="tag-yellow">⚠ 高GI</span>}
                   {m.exerciseBefore && <span className="tag-green">餐前運動</span>}
                   {m.exerciseAfter  && <span className="tag-blue">餐後運動</span>}

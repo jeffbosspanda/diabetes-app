@@ -17,6 +17,7 @@ import { computeDailySummary } from '../utils/dailySummary';
 import { predictBG30 } from '../utils/bgPredictor';
 import { computeMealPatternInsights } from '../utils/mealPatternInsights';
 import { computeAchievements } from '../utils/achievements';
+import { computeCyclePhase } from '../utils/cyclePhase';
 import { format, subHours, subDays } from 'date-fns';
 
 // ── High-contrast palette ───────────────────────────────────────────────────
@@ -63,24 +64,49 @@ function TimelineTooltip({ active, payload }) {
 const CHART_L = 24; // 34px YAxis width + (-10) left margin
 const CHART_R = 12; // right margin
 
+// Lane height per stacked row, and the minimum horizontal gap (% of plot width)
+// two chips must keep before they're considered overlapping.
+const LANE_H = 26;
+const MIN_GAP_PCT = 8;
+const MAX_LANES = 3;
+
 function EventMarkerStrip({ events, windowStart, windowEnd }) {
   const span = windowEnd - windowStart;
   const pct = (ts) => Math.max(0, Math.min(100, (ts - windowStart) / span * 100));
 
+  // Assign each chip to a lane so time-adjacent markers stack vertically instead
+  // of overprinting each other. Greedy first-fit by ascending time.
+  const sorted = [...events]
+    .map(ev => ({ ev, p: pct(new Date(ev.timestamp).getTime()) }))
+    .sort((a, b) => a.p - b.p);
+  const laneLastX = []; // last placed x% per lane
+  const placed = sorted.map(item => {
+    let lane = laneLastX.findIndex(x => item.p - x >= MIN_GAP_PCT);
+    if (lane === -1) {
+      if (laneLastX.length < MAX_LANES) { lane = laneLastX.length; laneLastX.push(item.p); }
+      else { // out of lanes — reuse the lane whose last marker is furthest left
+        lane = laneLastX.indexOf(Math.min(...laneLastX));
+        laneLastX[lane] = item.p;
+      }
+    } else {
+      laneLastX[lane] = item.p;
+    }
+    return { ...item, lane };
+  });
+  const laneCount = Math.max(1, laneLastX.length);
+
   return (
-    <div className="marker-strip" style={{ position: 'relative', height: 32, marginBottom: 0 }}>
-      {events.map((ev, i) => {
-        const p = pct(new Date(ev.timestamp).getTime());
+    <div className="marker-strip" style={{ position: 'relative', height: laneCount * LANE_H, marginBottom: 0 }}>
+      {placed.map(({ ev, p, lane }, i) => {
         const isMeal = ev._type === 'meal';
-        const color = isMeal
-          ? MEAL_COLOR
-          : insulinColor(ev.brandType);
+        const color = isMeal ? MEAL_COLOR : insulinColor(ev.brandType);
         const label = isMeal
           ? (MEAL_LABELS[ev.mealType] || '餐')[0]
           : `${ev.units}U`;
         return (
           <div key={i} className="ev-chip" style={{
             left: `calc(${CHART_L}px + (100% - ${CHART_L + CHART_R}px) * ${p / 100})`,
+            top: lane * LANE_H,
           }}>
             {isMeal ? (
               <div className="ev-chip-circle" style={{ background: color }}>{label}</div>
@@ -192,6 +218,12 @@ export default function Dashboard() {
     () => computeAchievements(state),
     [state.glucoseReadings, state.meals]
   );
+
+  // Menstrual-cycle phase (female users who logged their period).
+  const cycle = useMemo(() => {
+    if (state.profile?.gender !== 'female') return null;
+    return computeCyclePhase(state.profile?.lastPeriodStart, parseInt(state.profile?.cycleLength) || 28);
+  }, [state.profile]);
 
   // x-axis pinned to the selected day; explicit ticks force the full range
   const xDomain = useMemo(() => [winLo, winHi], [selDay]);
@@ -318,6 +350,7 @@ export default function Dashboard() {
               {bgPrediction.activeMeals.map((m, i) => (
                 <span key={i} className="bgp-chip bgp-chip-meal">
                   🍽 {m.foods?.slice(0, 12)}{m.foods?.length > 12 ? '…' : ''} 剩餘 {m.remaining}g 醣
+                  {m.glycemic ? ` · ${m.glycemic}` : ''}
                 </span>
               ))}
               {bgPrediction.activeRapid.map((r, i) => (
@@ -337,6 +370,22 @@ export default function Dashboard() {
               {bgPrediction.warning.msg}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Menstrual cycle phase (female) ── */}
+      {cycle && (
+        <div className={`card cycle-card cycle-${cycle.level}`} onClick={() => nav('/profile')} style={{ cursor: 'pointer' }}>
+          <div className="cycle-head">
+            <span className="cycle-flower">🌸</span>
+            <span className="cycle-phase">{cycle.label}</span>
+            <span className="cycle-day">週期第 {cycle.day} 天</span>
+            <span className={`cycle-trend cycle-trend-${cycle.bgTrend}`}>
+              {cycle.bgTrend === 'rising' ? '血糖易偏高 ↑' : cycle.bgTrend === 'falling' ? '血糖易偏低 ↓' : '血糖較平穩 →'}
+            </span>
+          </div>
+          <div className="cycle-note">{cycle.note}</div>
+          <div className="cycle-meta">距下次經期約 {cycle.daysToNextPeriod} 天 · 點此更新經期</div>
         </div>
       )}
 

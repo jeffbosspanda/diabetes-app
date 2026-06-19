@@ -146,6 +146,23 @@ export default function Reminders() {
       </div>
 
       <div className="card">
+        <h3>🤒 生病時的血糖管理（Sick-day）</h3>
+        <p className="hint" style={{ marginBottom: 8 }}>
+          感冒、發燒、感染或腸胃炎時，壓力荷爾蒙會讓血糖更難控制。以下為一般原則，實際請依醫師／衛教師指示。
+        </p>
+        <ul className="sickday-list">
+          <li><b>不可自行停打胰島素</b>：即使吃不下，長效（基礎）胰島素仍要照打；生病時身體更需要胰島素。</li>
+          <li><b>勤量血糖</b>：每 2–4 小時測一次；血糖高時依校正劑量補打速效。</li>
+          <li><b>注意酮體</b>：血糖持續 &gt; 250 mg/dL 或嘔吐時，檢查血／尿酮；有酮體 + 高血糖要提高警覺（DKA 風險）。</li>
+          <li><b>補充水分</b>：少量多次喝水；吃不下時改喝含醣飲料維持碳水避免低血糖。</li>
+          <li><b>用藥小心</b>：類固醇會明顯升血糖；部分感冒糖漿含糖；止痛退燒藥相對安全但仍依藥師指示。第二型口服藥（如 metformin、SGLT2）生病脫水時可能需暫停，請先問醫師。</li>
+        </ul>
+        <div className="sickday-alert">
+          ⚠️ 出現以下情況請盡速就醫：持續嘔吐無法進食、血糖居高不下且有酮體、呼吸急促或意識改變、低血糖反覆無法回升。
+        </div>
+      </div>
+
+      <div className="card">
         <h3><Dumbbell size={16} /> 快速記錄運動</h3>
         <QuickExercise dispatch={dispatch} />
       </div>

@@ -8,6 +8,7 @@ export default function Profile() {
     name: '', birthDate: '', age: '', gender: '', weight: '', height: '',
     bodyFat: '', muscleMass: '', diabetesType: 'type1',
     diagnosedYear: '', tdd: '', notes: '',
+    lastPeriodStart: '', cycleLength: '28',
   });
   const [saved, setSaved] = useState(false);
 
@@ -86,6 +87,27 @@ export default function Profile() {
           </div>
         </div>
       </div>
+
+      {form.gender === 'female' && (
+        <div className="card">
+          <h3>🌸 生理期追蹤</h3>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            記錄經期後，系統會推算目前所處階段並提示血糖波動趨勢（經前黃體期胰島素阻抗上升、血糖易偏高）。僅供參考，調整劑量請先諮詢醫師。
+          </p>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>上次經期開始日</label>
+              <input type="date" value={form.lastPeriodStart || ''} max={new Date().toISOString().slice(0, 10)}
+                onChange={e => set('lastPeriodStart', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>平均週期天數</label>
+              <input type="number" min="20" max="40" step="1" value={form.cycleLength ?? '28'}
+                onChange={e => set('cycleLength', e.target.value)} placeholder="28" />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <h3>身體數據</h3>

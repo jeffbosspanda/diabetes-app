@@ -123,6 +123,26 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - `src/components/Settings.jsx`：加「新手教學」卡片，按鈕設 `{onboardingCompleted:false, onboardingStep:0}` 重啟（overlay 立即覆蓋當前頁）。
 - `src/App.css`：`.onboard-pill` 浮動鈕樣式。
 
+### 首頁事件標記防重疊（第二次）
+- `src/components/Dashboard.jsx` `EventMarkerStrip`：加多車道貪婪堆疊（`MIN_GAP_PCT=8`、`MAX_LANES=3`），時間相近的餐點/胰島素標記垂直分層，strip 高度隨車道數成長。
+
+### 女性生理期追蹤 + 生病用藥衛教
+- `src/utils/cyclePhase.js`（新）：依上次經期日 + 週期長度推算階段（月經/濾泡/排卵/黃體）與血糖趨勢提示（黃體經前胰島素阻抗↑血糖偏高；月經期易低）。不自動改劑量。
+- `src/components/Profile.jsx`：性別=女時顯示「🌸 生理期追蹤」（上次經期開始日 + 平均週期天數，存 `profile.lastPeriodStart/cycleLength`）。
+- `src/components/Dashboard.jsx`：女性且有經期資料時顯示週期階段卡（階段/週期第幾天/血糖趨勢/距下次經期），點擊回 Profile。
+- `src/components/Reminders.jsx`：加「🤒 生病時的血糖管理（Sick-day）」衛教卡（不停基礎胰島素、勤量、酮體、補水、用藥注意 + 就醫時機）。
+- `src/App.css`：`.cycle-*`、`.sickday-*` 樣式。
+
+### 食物升糖型態自動分類 + 預測/分析採用
+- `src/utils/glycemicResponse.js`（新）：`classifyGlycemicResponse({carbs,protein,fat,highGICount})` / `classifyMeal(meal)` → 四型：
+  - fast 快速升糖（高GI）peak~45 / abs90 / lag0
+  - delayed 緩慢升糖（低GI 複合）abs180 / lag10
+  - fatProtein 高脂高蛋白·延遲升糖（fat≥20 或 protein≥25）peak~180 / abs300 / lag30
+  - minimal 低升糖（carbs<10）
+- `src/utils/bgPredictor.js`：碳水吸收改三角前傾曲線 + 依型態的 `absMin`/`lagMin`（高脂高蛋白延後起效、拉長吸收）；`activeMeals` 回傳 `glycemic`/`glycemicType`。
+- UI 標示：`MealLog`（分析卡 glycemic-box + 紀錄列 tag）、`InsulinAdvisor`（食物分析卡）、`Dashboard`（預測 activeMeals chip 附型態）。
+- `src/App.css`：`.glycemic-*`、`.tag-glycemic`。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）

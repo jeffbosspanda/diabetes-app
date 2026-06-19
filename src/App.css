@@ -1582,6 +1582,43 @@ textarea { resize: vertical; }
   animation: onboardPop 0.25s ease;
 }
 
+/* ── Glycemic response classification ── */
+.glycemic-box {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 10px; padding: 8px 10px;
+  border: 1px solid; border-left-width: 4px; border-radius: 10px;
+  background: var(--surface2, rgba(0,0,0,0.02));
+}
+.glycemic-badge {
+  align-self: flex-start; color: #fff; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px;
+}
+.glycemic-note { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
+.tag-glycemic { color: #fff; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+
+/* ── Menstrual cycle card ── */
+.cycle-card { border-left: 4px solid var(--accent, #863bff); }
+.cycle-card.cycle-warn { border-left-color: #f59e0b; }
+.cycle-card.cycle-good { border-left-color: #22c55e; }
+.cycle-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 6px; }
+.cycle-flower { font-size: 16px; }
+.cycle-phase { font-weight: 700; font-size: 14px; }
+.cycle-day { font-size: 12px; color: var(--text-muted); }
+.cycle-trend { margin-left: auto; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface2, #f1f1f4); }
+.cycle-trend-rising { color: #f59e0b; }
+.cycle-trend-falling { color: #ef4444; }
+.cycle-trend-stable { color: #22c55e; }
+.cycle-note { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }
+.cycle-meta { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+
+/* ── Sick-day guidance ── */
+.sickday-list { margin: 0 0 8px; padding-left: 18px; }
+.sickday-list li { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); margin-bottom: 4px; }
+.sickday-alert {
+  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.6; color: #b91c1c;
+}
+
 /* ── Settings Q&A ── */
 .qa-list { display: flex; flex-direction: column; gap: 4px; }
 .qa-item { border-bottom: 1px solid var(--border, #eee); padding: 4px 0; }

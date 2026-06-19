@@ -5,6 +5,8 @@
 //   Only the DELTA is added — not the full effect — to avoid double-counting
 //   what the regression slope already captures.
 
+import { classifyMeal } from './glycemicResponse';
+
 const STALE_MS    = 15 * 60 * 1000;
 const WINDOW_MS   = 60 * 60 * 1000;
 const PREDICT_MIN = 30;
@@ -49,16 +51,26 @@ function insulinDelta30(t, units, isf, dia = 240) {
   return (futureRate - currentRate) * PREDICT_MIN;
 }
 
-// ── Carb absorption (linear over absorptionTime) ──────────────────────────────
-function carbBGRate(t, carbs, isf, icr, absMin) {
-  if (t < 0 || t >= absMin) return 0;
-  return (carbs / absMin) * (isf / icr); // constant rate while absorbing
+// ── Carb absorption ───────────────────────────────────────────────────────────
+// Absorption starts after `lagMin` (fat/protein meals empty the stomach slowly)
+// and finishes by lagMin+absMin. Within the window the rate is front-loaded
+// (triangular, peaking early) so fast meals spike and fat/protein meals rise late.
+function carbBGRate(t, carbs, isf, icr, absMin, lagMin = 0) {
+  const tt = t - lagMin;
+  if (tt < 0 || tt >= absMin) return 0;
+  const peak = absMin * 0.35;               // most carbs absorb in the first third
+  const total = carbs * (isf / icr);        // total BG rise this meal will cause
+  // Triangular activity shape, area normalized to 1 over absMin.
+  const shape = tt <= peak
+    ? tt / (peak * (absMin / 2))
+    : (absMin - tt) / ((absMin - peak) * (absMin / 2));
+  return total * Math.max(0, shape);
 }
 
 // Delta: change in carb-BG contribution in next 30 min vs current rate
-function mealDelta30(t, carbs, isf, icr, absMin) {
-  const currentRate = carbBGRate(t, carbs, isf, icr, absMin);
-  const futureRate  = [10, 20, 30].reduce((s, dt) => s + carbBGRate(t + dt, carbs, isf, icr, absMin), 0) / 3;
+function mealDelta30(t, carbs, isf, icr, absMin, lagMin = 0) {
+  const currentRate = carbBGRate(t, carbs, isf, icr, absMin, lagMin);
+  const futureRate  = [10, 20, 30].reduce((s, dt) => s + carbBGRate(t + dt, carbs, isf, icr, absMin, lagMin), 0) / 3;
   return (futureRate - currentRate) * PREDICT_MIN;
 }
 
@@ -152,13 +164,20 @@ export function predictBG30(glucoseReadings, meals = [], insulinLogs = [], icr =
   for (const meal of meals) {
     if (!meal.carbs || meal.carbs <= 0) continue;
     const t = (now - new Date(meal.timestamp).getTime()) / 60000;
-    if (t < 0 || t > 240) continue;
-    const absMin = meal.highGI?.length > 0 ? 60 : 120;
-    if (t >= absMin) continue; // already fully absorbed
-    const delta = mealDelta30(t, meal.carbs, isf, icr, absMin);
+    if (t < 0) continue;
+    // Glycemic profile sets absorption duration + onset lag (fat/protein = late).
+    const prof = classifyMeal(meal);
+    const absMin = prof.absMin;
+    const lagMin = prof.lagMin;
+    if (t >= lagMin + absMin) continue; // already fully absorbed
+    const delta = mealDelta30(t, meal.carbs, isf, icr, absMin, lagMin);
     mealContrib += delta;
-    const remaining = Math.max(0, meal.carbs * (1 - t / absMin));
-    activeMeals.push({ foods: meal.foods, carbs: meal.carbs, remaining: Math.round(remaining), minsAgo: Math.round(t) });
+    const elapsed = Math.max(0, t - lagMin);
+    const remaining = Math.max(0, meal.carbs * (1 - elapsed / absMin));
+    activeMeals.push({
+      foods: meal.foods, carbs: meal.carbs, remaining: Math.round(remaining),
+      minsAgo: Math.round(t), glycemic: prof.label, glycemicType: prof.type,
+    });
   }
   mealContrib = Math.round(mealContrib);
 

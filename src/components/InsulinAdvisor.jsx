@@ -10,6 +10,7 @@ import {
   getBrandProfile,
 } from '../utils/insulinCalculator';
 import { parseMealText } from '../utils/foodParser';
+import { classifyGlycemicResponse } from '../utils/glycemicResponse';
 import { format } from 'date-fns';
 import { SEED_ANALYSIS } from '../utils/seedData';
 
@@ -550,6 +551,15 @@ export default function InsulinAdvisor() {
                 ))}
               </div>
             )}
+            {(() => {
+              const g = classifyGlycemicResponse(foodAnalysis);
+              return (
+                <div className="glycemic-box" style={{ borderColor: g.color }}>
+                  <span className="glycemic-badge" style={{ background: g.color }}>{g.emoji} {g.label}</span>
+                  <span className="glycemic-note">{g.note}</span>
+                </div>
+              );
+            })()}
           </div>
         )}
 
