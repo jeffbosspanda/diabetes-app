@@ -3,7 +3,7 @@ import { useApp } from '../store/AppContext';
 import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { parseMealText, parseMealFoods } from '../utils/foodParser';
-import { classifyGlycemicResponse, classifyMeal, classifyFood } from '../utils/glycemicResponse';
+import { classifyGlycemicResponse, classifyFood } from '../utils/glycemicResponse';
 import ConfirmDialog from './ConfirmDialog';
 import { calcDietaryNeeds, analyzeDailyIntake, getDietaryTips, buildNutrientAdvice, mealNutrientFeedback, VEG_TYPES } from '../utils/dietaryAdvisor';
 import NutrientImpactRanking from './NutrientImpactRanking';
@@ -625,7 +625,6 @@ export default function MealLog() {
                   {m.protein > 0  && <span>蛋白 {m.protein}g</span>}
                   {m.calories > 0 && <span>{m.calories}kcal</span>}
                   {m.preMealBG    && <span>餐前BG {m.preMealBG}</span>}
-                  {m.carbs > 0 && (() => { const g = classifyMeal(m); return <span className="tag-glycemic" style={{ background: g.color }}>{g.emoji} {g.label}</span>; })()}
                   {m.highGI?.length > 0 && <span className="tag-yellow">⚠ 高GI</span>}
                   {m.exerciseBefore && <span className="tag-green">餐前運動</span>}
                   {m.exerciseAfter  && <span className="tag-blue">餐後運動</span>}

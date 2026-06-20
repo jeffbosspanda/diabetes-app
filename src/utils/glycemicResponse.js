@@ -21,7 +21,7 @@ export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, high
 
   if (carbs < 10 && !highFat && !highProtein) {
     return {
-      type: 'minimal', label: '低升糖', emoji: '🟢', color: '#22c55e',
+      type: 'minimal', label: '低升糖', emoji: '🟢', color: '#5cb89a',
       peakMin: 60, lagMin: 0, absMin: 90,
       note: '碳水偏低，對血糖影響小。',
     };
@@ -29,7 +29,7 @@ export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, high
 
   if (highFat || highProtein) {
     return {
-      type: 'fatProtein', label: '高脂高蛋白·延遲升糖', emoji: '🟣', color: '#a855f7',
+      type: 'fatProtein', label: '高脂高蛋白·延遲升糖', emoji: '🟣', color: '#7f9cc4',
       peakMin: 180, lagMin: 30, absMin: 300,
       note: `脂肪 ${Math.round(fat)}g／蛋白 ${Math.round(protein)}g 偏高，胃排空變慢，血糖高峰延後（約 2–4 小時）且持久；太早打餐前胰島素易先低後高，可考慮延後或分次注射。`,
     };
@@ -37,14 +37,14 @@ export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, high
 
   if (hiGI > 0) {
     return {
-      type: 'fast', label: '快速升糖', emoji: '🔴', color: '#ef4444',
+      type: 'fast', label: '快速升糖', emoji: '🔴', color: '#e08585',
       peakMin: 45, lagMin: 0, absMin: 90,
       note: '含高GI食物，血糖上升快、峰值早（約 30–60 分鐘）；提前注射、先吃菜與蛋白質、最後吃澱粉可削平峰值。',
     };
   }
 
   return {
-    type: 'delayed', label: '緩慢升糖', emoji: '🟡', color: '#f59e0b',
+    type: 'delayed', label: '緩慢升糖', emoji: '🟡', color: '#d4a85c',
     peakMin: 120, lagMin: 10, absMin: 180,
     note: '以低GI／複合碳水為主，血糖上升較緩、較平穩。',
   };
