@@ -3,6 +3,8 @@
 // gram: default serving weight in grams
 // carbs/protein/fat in grams, calories in kcal
 
+import { NUTRITION_EXT } from './nutritionExt.js';
+
 export const FOOD_DB = [
   // ── 主食 ──
   { name: '白飯', aliases: ['米飯', '飯', '白米飯', '米'], unit: '碗', gram: 200, carbs: 46, protein: 4, fat: 0.4, calories: 232, gi: 72 },
@@ -153,21 +155,34 @@ FOOD_DB.forEach(item => {
   item.aliases.forEach(a => _lookup.set(a, item));
 });
 
-export function lookupFood(keyword) {
-  if (!keyword) return null;
-  // Exact match first
-  if (_lookup.has(keyword)) return _lookup.get(keyword);
-  // Partial match — require ≥2 chars on BOTH sides to avoid spurious hits
-  // (e.g. single char 「料」matching 「含糖飲料」, 「食」matching 「即食燕麥」).
+// Extended per-100g table (auto-generated from the TW official nutrition CSV).
+// Shaped like a curated entry with a neutral 100g serving so the parser scales it
+// by weight. carbs = NET carb per 100g (glucose-impacting). No GI/fat data, so
+// gi:null and fat:0 — curated DB is always consulted first and keeps priority.
+const _ext = new Map();
+for (const [name, aliases, carb100, prot100, kcal100, fiber100] of NUTRITION_EXT) {
+  const entry = { name, gram: 100, carbs: carb100, protein: prot100, fat: 0, calories: kcal100, fiber: fiber100, gi: null, ext: true };
+  if (!_ext.has(name)) _ext.set(name, entry);
+  for (const a of aliases) if (!_ext.has(a)) _ext.set(a, entry);
+}
+
+function lookupIn(map, keyword) {
+  if (map.has(keyword)) return map.get(keyword);
   if (keyword.length < 2) return null;
   // Pick the LONGEST matching key so the most specific food wins
   // (e.g. 「葡萄糖一包」matches 葡萄糖, not 葡萄).
   let best = null, bestLen = 0;
-  for (const [key, item] of _lookup) {
+  for (const [key, item] of map) {
     if (key.length < 2) continue;
     if ((keyword.includes(key) || key.includes(keyword)) && key.length > bestLen) {
       best = item; bestLen = key.length;
     }
   }
   return best;
+}
+
+export function lookupFood(keyword) {
+  if (!keyword) return null;
+  // Curated DB first (has real servings + GI), then the extended per-100g table.
+  return lookupIn(_lookup, keyword) || lookupIn(_ext, keyword);
 }
