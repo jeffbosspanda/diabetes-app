@@ -281,16 +281,24 @@ app.get('/api/libre/health', (_req, res) => res.json({ ok: true, version: CLIENT
 // independent of whether the client app is open — so the 12h windows always
 // overlap and history accumulates to RETAIN_DAYS with no gaps.
 
-// Merge new readings into existing, dedup by timestamp, drop > RETAIN_DAYS old.
-// The freshest LibreLink fetch is AUTHORITATIVE: if a timestamp already exists
-// but LibreLinkUp now reports a different value (it back-fills/smooths the last
-// ~hour), the incoming value REPLACES the stored one so our chart keeps matching
-// the LibreLink source. This is source reconciliation, not manual editing.
+// Merge a fresh LibreLink fetch into accumulated history.
+// AUTHORITATIVE WINDOW RECONCILIATION: the fetch covers a ~12h window, and within
+// it LibreLink is the single source of truth. Keep accumulated history OUTSIDE the
+// window, and replace the ENTIRE in-window slice with the incoming readings — this
+// corrects revised values AND drops stale/duplicate points so every in-window
+// reading matches LibreLink exactly. Source reconciliation, not manual editing.
 function mergeGlucose(existing = [], incoming = []) {
-  const byTs = new Map(existing.map(r => [r.timestamp, r]));
-  for (const r of incoming) byTs.set(r.timestamp, r); // incoming wins on conflict
   const cutoff = Date.now() - RETAIN_DAYS * 24 * 60 * 60 * 1000;
-  return [...byTs.values()].filter(r => new Date(r.timestamp).getTime() >= cutoff);
+  const inRetain = (r) => new Date(r.timestamp).getTime() >= cutoff;
+  if (!incoming.length) return existing.filter(inRetain);
+
+  const times = incoming.map(r => new Date(r.timestamp).getTime());
+  const lo = Math.min(...times), hi = Math.max(...times);
+  const outside = existing.filter(r => {
+    const t = new Date(r.timestamp).getTime();
+    return t < lo || t > hi;
+  });
+  return [...outside, ...incoming].filter(inRetain);
 }
 
 // Send a push payload to every subscription a user has registered. Returns the

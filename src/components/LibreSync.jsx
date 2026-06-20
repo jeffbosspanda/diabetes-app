@@ -34,14 +34,27 @@ export default function LibreSync() {
     setStatus('syncing');
     try {
       const { readings, count } = await syncLibreData(username, password);
-      // Reconcile by timestamp: count brand-new vs value-changed points.
-      // LibreLinkUp revises recent values, so an existing timestamp may now carry
-      // a different value — we upsert so the chart always matches LibreLink.
-      const existing = new Map(stateRef.current.glucoseReadings.map(r => [r.timestamp, r.value]));
-      const newCount     = readings.filter(r => !existing.has(r.timestamp)).length;
-      const changedCount = readings.filter(r => existing.has(r.timestamp) && existing.get(r.timestamp) !== r.value).length;
-      if (newCount || changedCount) {
-        dispatch({ type: 'UPSERT_GLUCOSE', payload: readings });
+      // Authoritative window reconciliation: compare EVERY LibreLink reading in
+      // the synced ~12h window against system data. Any mismatch (new value,
+      // changed value, or a stale system point LibreLink no longer reports) is
+      // corrected to the latest LibreLink data — the window is replaced wholesale.
+      if (readings.length) {
+        const incomingTimes = readings.map(r => new Date(r.timestamp).getTime());
+        const lo = Math.min(...incomingTimes), hi = Math.max(...incomingTimes);
+        const incomingByTs = new Map(readings.map(r => [r.timestamp, r.value]));
+        const inWindowExisting = stateRef.current.glucoseReadings.filter(r => {
+          const t = new Date(r.timestamp).getTime();
+          return t >= lo && t <= hi;
+        });
+        const existingByTs = new Map(inWindowExisting.map(r => [r.timestamp, r.value]));
+        const newCount     = readings.filter(r => !existingByTs.has(r.timestamp)).length;
+        const changedCount = readings.filter(r => existingByTs.has(r.timestamp) && existingByTs.get(r.timestamp) !== r.value).length;
+        const removedCount = inWindowExisting.filter(r => !incomingByTs.has(r.timestamp)).length;
+
+        dispatch({ type: 'RECONCILE_GLUCOSE', payload: readings });
+        setMessage(`已同步 ${count} 筆，新增 ${newCount}${changedCount ? `，修正 ${changedCount}` : ''}${removedCount ? `，清除過時 ${removedCount}` : ''}`);
+      } else {
+        setMessage('已同步，但本次無血糖資料');
       }
       dispatch({ type: 'UPDATE_SETTINGS', payload: {
         integrations: { ...stateRef.current.settings.integrations, freestyleLibre: true },
@@ -49,7 +62,6 @@ export default function LibreSync() {
       setLatestReading(readings[0] || null);
       setLastSync(new Date());
       setStatus('success');
-      setMessage(`已同步 ${count} 筆，新增 ${newCount} 筆${changedCount ? `，更新 ${changedCount} 筆` : ''}`);
     } catch (err) {
       setStatus('error');
       setMessage(err.message);

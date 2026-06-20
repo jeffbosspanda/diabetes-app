@@ -38,13 +38,22 @@ function reducer(state, action) {
   switch (action.type) {
     case 'SET_PROFILE': return { ...state, profile: action.payload };
     case 'ADD_GLUCOSE': return { ...state, glucoseReadings: [...state.glucoseReadings, action.payload] };
-    // Upsert synced readings by timestamp — the freshest LibreLink fetch is
-    // authoritative, so a revised value REPLACES the stored one (keeps the chart
-    // matching LibreLink exactly). payload = array of readings.
-    case 'UPSERT_GLUCOSE': {
-      const byTs = new Map(state.glucoseReadings.map(r => [r.timestamp, r]));
-      for (const r of action.payload) byTs.set(r.timestamp, { ...byTs.get(r.timestamp), ...r });
-      return { ...state, glucoseReadings: [...byTs.values()] };
+    // Authoritative window reconciliation. The latest LibreLink fetch covers a
+    // ~12h window; within that window LibreLink is the single source of truth.
+    // Keep accumulated history OUTSIDE the window untouched, and replace the
+    // ENTIRE in-window slice with the freshly synced readings — this corrects
+    // changed values AND removes any stale/duplicate points so every reading in
+    // the window matches LibreLink exactly. payload = array of readings.
+    case 'RECONCILE_GLUCOSE': {
+      const incoming = action.payload;
+      if (!incoming?.length) return state;
+      const times = incoming.map(r => new Date(r.timestamp).getTime());
+      const lo = Math.min(...times), hi = Math.max(...times);
+      const outside = state.glucoseReadings.filter(r => {
+        const t = new Date(r.timestamp).getTime();
+        return t < lo || t > hi;
+      });
+      return { ...state, glucoseReadings: [...outside, ...incoming] };
     }
     case 'ADD_MEAL': return { ...state, meals: [...state.meals, action.payload] };
     case 'UPDATE_MEAL': return { ...state, meals: state.meals.map((m, i) => i === action.payload.index ? { ...m, ...action.payload.data } : m) };
