@@ -10,7 +10,12 @@
 //
 // peakMin / lagMin / absMin are used by the predictor: carbs start absorbing after
 // lagMin and finish by lagMin+absMin (longer & later for fat/protein meals).
-export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, highGICount = 0 } = {}) {
+export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, highGICount = 0, highGI } = {}) {
+  // Accept either an explicit highGICount OR a highGI array (parseMealText returns
+  // the latter). Without this, passing an analysis object straight in silently
+  // reads highGICount=0, so a high-GI meal (e.g. 葡萄糖) would be mislabelled
+  // 緩慢升糖 even while its per-food row shows 快速升糖.
+  const hiGI = highGICount || (Array.isArray(highGI) ? highGI.length : 0);
   const highFat = fat >= 20;
   const highProtein = protein >= 25;
 
@@ -30,7 +35,7 @@ export function classifyGlycemicResponse({ carbs = 0, protein = 0, fat = 0, high
     };
   }
 
-  if (highGICount > 0) {
+  if (hiGI > 0) {
     return {
       type: 'fast', label: '快速升糖', emoji: '🔴', color: '#ef4444',
       peakMin: 45, lagMin: 0, absMin: 90,
