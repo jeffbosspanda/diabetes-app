@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { parseMealText, parseMealFoods } from '../utils/foodParser';
 import { classifyGlycemicResponse, classifyMeal, classifyFood } from '../utils/glycemicResponse';
@@ -34,12 +34,15 @@ export default function MealLog() {
   // confirm dialog state
   const [confirm, setConfirm] = useState(null); // { type: 'delete'|'edit', index, data? }
 
-  // Scroll the add/edit form into view when it opens (it renders near the top
-  // of a long page, so editing a row at the bottom otherwise looks like a no-op).
-  const formRef = useRef(null);
+  // The add/edit form opens as a centered modal (see render) so editing a row
+  // never scrolls the page back to the top — avoids confusing it with the input
+  // area. Lock body scroll while the modal is open.
   useEffect(() => {
-    if (showForm) formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [showForm, editIndex]);
+    if (!showForm) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [showForm]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -186,8 +189,14 @@ export default function MealLog() {
       </div>
 
       {showForm && (
-        <div className="card form-card" ref={formRef}>
-          <h3>{editIndex !== null ? '編輯紀錄' : '記錄這餐'}</h3>
+        <div className="meal-form-overlay">
+        <div className="card form-card meal-form-modal">
+          <div className="meal-form-modal-head">
+            <h3>{editIndex !== null ? '編輯紀錄' : '記錄這餐'}</h3>
+            <button className="meal-form-close" onClick={() => { setShowForm(false); setAnalysis(null); setEditIndex(null); }} aria-label="關閉">
+              <X size={18} />
+            </button>
+          </div>
 
           <div className="meal-type-row">
             {MEAL_TYPES.map(m => (
@@ -419,6 +428,7 @@ export default function MealLog() {
             </button>
             <button className="btn-secondary" onClick={() => { setShowForm(false); setAnalysis(null); setEditIndex(null); }}>取消</button>
           </div>
+        </div>
         </div>
       )}
 

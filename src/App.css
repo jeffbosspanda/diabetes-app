@@ -777,6 +777,29 @@ textarea { resize: vertical; }
   display: flex; align-items: center; justify-content: center;
   z-index: 1000; padding: 20px;
 }
+
+/* Meal add/edit modal — opens centered so editing never scrolls back to the
+   page's input area (avoids confusing edit-in-place with adding a new meal). */
+.meal-form-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: flex-start; justify-content: center;
+  z-index: 1000; padding: 24px 12px; overflow-y: auto;
+}
+.meal-form-modal {
+  width: 100%; max-width: 460px; margin: auto;
+  max-height: calc(100vh - 48px); overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+}
+.meal-form-modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.meal-form-modal-head h3 { margin: 0; }
+.meal-form-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border: none; border-radius: 8px;
+  background: var(--surface2, #f1f1f4); color: var(--text-muted); cursor: pointer;
+}
+.meal-form-close:hover { background: var(--border, #e2e2e6); color: var(--text); }
 .dialog-box {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 16px; padding: 24px 20px;
