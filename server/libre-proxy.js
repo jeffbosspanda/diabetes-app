@@ -188,7 +188,12 @@ async function libre_read(session) {
   const { connection, graphData } = graphJson.data;
 
   const mapReading = (r) => ({
-    value: r.Value,
+    // ALWAYS use ValueInMgPerDl. `Value` is in the LibreLinkUp account's DISPLAY
+    // unit — if that account is set to mmol/L, `Value` is mmol (e.g. 5.5) while we
+    // label everything mg/dL, so the chart would disagree with the LibreLink app.
+    // ValueInMgPerDl is the unit-independent mg/dL field (fallback to Value only
+    // if absent, for robustness).
+    value: (typeof r.ValueInMgPerDl === 'number') ? r.ValueInMgPerDl : r.Value,
     // FactoryTimestamp is UTC; Timestamp is patient-local. Parse explicitly as
     // UTC so the result is correct regardless of the server's timezone (Render
     // runs UTC, a dev laptop may not) — `new Date(str)` would misread it.
@@ -277,11 +282,15 @@ app.get('/api/libre/health', (_req, res) => res.json({ ok: true, version: CLIENT
 // overlap and history accumulates to RETAIN_DAYS with no gaps.
 
 // Merge new readings into existing, dedup by timestamp, drop > RETAIN_DAYS old.
+// The freshest LibreLink fetch is AUTHORITATIVE: if a timestamp already exists
+// but LibreLinkUp now reports a different value (it back-fills/smooths the last
+// ~hour), the incoming value REPLACES the stored one so our chart keeps matching
+// the LibreLink source. This is source reconciliation, not manual editing.
 function mergeGlucose(existing = [], incoming = []) {
-  const seen = new Set(existing.map(r => r.timestamp));
-  const merged = existing.concat(incoming.filter(r => !seen.has(r.timestamp)));
+  const byTs = new Map(existing.map(r => [r.timestamp, r]));
+  for (const r of incoming) byTs.set(r.timestamp, r); // incoming wins on conflict
   const cutoff = Date.now() - RETAIN_DAYS * 24 * 60 * 60 * 1000;
-  return merged.filter(r => new Date(r.timestamp).getTime() >= cutoff);
+  return [...byTs.values()].filter(r => new Date(r.timestamp).getTime() >= cutoff);
 }
 
 // Send a push payload to every subscription a user has registered. Returns the

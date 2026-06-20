@@ -34,16 +34,22 @@ export default function LibreSync() {
     setStatus('syncing');
     try {
       const { readings, count } = await syncLibreData(username, password);
-      const existing = new Set(stateRef.current.glucoseReadings.map(r => r.timestamp));
-      const newReadings = readings.filter(r => !existing.has(r.timestamp));
-      newReadings.forEach(r => dispatch({ type: 'ADD_GLUCOSE', payload: r }));
+      // Reconcile by timestamp: count brand-new vs value-changed points.
+      // LibreLinkUp revises recent values, so an existing timestamp may now carry
+      // a different value — we upsert so the chart always matches LibreLink.
+      const existing = new Map(stateRef.current.glucoseReadings.map(r => [r.timestamp, r.value]));
+      const newCount     = readings.filter(r => !existing.has(r.timestamp)).length;
+      const changedCount = readings.filter(r => existing.has(r.timestamp) && existing.get(r.timestamp) !== r.value).length;
+      if (newCount || changedCount) {
+        dispatch({ type: 'UPSERT_GLUCOSE', payload: readings });
+      }
       dispatch({ type: 'UPDATE_SETTINGS', payload: {
         integrations: { ...stateRef.current.settings.integrations, freestyleLibre: true },
       }});
       setLatestReading(readings[0] || null);
       setLastSync(new Date());
       setStatus('success');
-      setMessage(`已同步 ${count} 筆，新增 ${newReadings.length} 筆`);
+      setMessage(`已同步 ${count} 筆，新增 ${newCount} 筆${changedCount ? `，更新 ${changedCount} 筆` : ''}`);
     } catch (err) {
       setStatus('error');
       setMessage(err.message);
