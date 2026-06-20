@@ -101,6 +101,9 @@ export default function MealLog() {
 
   const handleSave = () => {
     if (!form.foods && !manualReady && !analysis) return;
+    // Block saving an auto-analysis whose carbs are undetermined — recording 0 g
+    // would mislead the dose calculator. Force manual entry instead.
+    if (inputMode === 'auto' && analysis?.undetermined) { setInputMode('manual'); return; }
     const nutrition = inputMode === 'manual'
       ? { carbs: parseFloat(manual.carbs) || 0, protein: parseFloat(manual.protein) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, highGI: [], diabetesNotes: '', analysisConfidence: 'manual' }
       : { carbs: analysis?.carbs ?? 0, protein: analysis?.protein ?? 0, fat: analysis?.fat ?? 0, calories: analysis?.calories ?? 0, highGI: analysis?.highGI ?? [], diabetesNotes: analysis?.diabetesNotes ?? '', analysisConfidence: analysis?.confidence };
@@ -225,9 +228,9 @@ export default function MealLog() {
               <div className="form-group">
                 <label>餐點內容描述</label>
                 <textarea value={form.foods} onChange={e => handleFoodsChange(e.target.value)}
-                  placeholder="例：白飯一碗、兩根香蕉、一湯匙花生醬、200g雞腿、炒青菜半盤" rows={3} />
+                  placeholder="例：白飯一碗、兩根香蕉、200g雞腿、半斤豬肉、葡萄糖一包、碳水50" rows={3} />
                 <div className="food-input-hint">
-                  支援重量「200g白飯」「200公克白飯」會按比例換算；也支援常用單位「一碗」「兩根」「3片」「一湯匙」「半杯」（阿拉伯或中文數字皆可）
+                  支援重量「200g／公克／克白飯」「半斤豬肉」「3兩牛肉」按比例換算（1 台斤＝600g、1 兩＝37.5g）；常用單位「一碗」「兩根」「3片」「一湯匙」；可直接寫碳水量「碳水50」或補糖「葡萄糖一包」。<b>無法判斷時會明確標示，請改用手動輸入。</b>
                 </div>
               </div>
               <button className="btn-analyze" onClick={handleAnalyze} disabled={!form.foods.trim()}>
@@ -282,20 +285,51 @@ export default function MealLog() {
                 <Zap size={14} color="var(--accent2)" />
                 <span>營養分析結果</span>
                 <span className={`confidence-badge conf-${analysis.confidence}`}>
-                  {analysis.confidence === 'high' ? '高信心' : analysis.confidence === 'medium' ? '中信心' : '低信心'}
+                  {analysis.confidence === 'high' ? '高信心'
+                    : analysis.confidence === 'medium' ? '中信心'
+                    : analysis.confidence === 'partial' ? '部分無法判斷'
+                    : analysis.confidence === 'undetermined' ? '無法判斷'
+                    : '低信心'}
                 </span>
               </div>
+
+              {/* Carbs could not be determined at all → do not trust 0 g; push to manual */}
+              {analysis.undetermined && (
+                <div className="undetermined-banner">
+                  <AlertTriangle size={14} />
+                  <div>
+                    <b>系統無法判斷碳水量</b>
+                    <div className="undetermined-sub">
+                      請改用「手動輸入」填寫碳水，或在描述中直接寫碳水量（例：<b>碳水50</b>）或份量（例：<b>白飯一碗</b>、<b>200g</b>、<b>半斤</b>、<b>葡萄糖一包</b>）。
+                    </div>
+                    <button type="button" className="btn-switch-manual" onClick={() => setInputMode('manual')}>
+                      <Pencil size={12} /> 改用手動輸入碳水
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Some items recognized, others not → totals may undercount */}
+              {analysis.partial && (analysis.unmatched || []).length > 0 && (
+                <div className="partial-banner">
+                  <AlertTriangle size={13} />
+                  <span>有項目<b>無法判斷</b>（{analysis.unmatched.join('、')}），其碳水未計入，總量可能<b>低估</b>。可補述份量或改用手動輸入。</span>
+                </div>
+              )}
+
               <div className="detected-foods">
                 {(analysis.foods || []).map((f, i) => <span key={i} className="food-tag">{f}</span>)}
                 {(analysis.unmatched || []).length > 0 && (
-                  <span className="food-tag unmatched-tag" title="資料庫中未找到">
-                    ⚠ 未識別：{analysis.unmatched.join('、')}
+                  <span className="food-tag unmatched-tag" title="資料庫中未找到，碳水未計入">
+                    ⚠ 無法判斷：{analysis.unmatched.join('、')}
                   </span>
                 )}
               </div>
               <div className="nutrition-grid">
                 <div className="nutrition-item carbs">
-                  <div className="nutrition-value">{analysis.carbs}<span>g</span></div>
+                  <div className="nutrition-value">
+                    {analysis.undetermined ? <span className="nv-unknown">無法判斷</span> : <>{analysis.carbs}<span>g</span></>}
+                  </div>
                   <div className="nutrition-label">碳水化合物</div>
                 </div>
                 <div className="nutrition-item protein">
@@ -325,13 +359,22 @@ export default function MealLog() {
               )}
               {(() => {
                 const g = classifyGlycemicResponse(analysis);
-                const perFood = parseMealFoods(form.foods || '').filter(f => (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
+                const perFood = parseMealFoods(form.foods || '').filter(f => f.undetermined || (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
                 return (
                   <div className="glycemic-box" style={{ borderColor: g.color }}>
                     <span className="glycemic-badge" style={{ background: g.color }}>整餐：{g.emoji} {g.label}</span>
                     {perFood.length > 0 && (
                       <div className="food-glycemic-list" style={{ marginTop: 2 }}>
                         {perFood.map((f, j) => {
+                          if (f.undetermined) {
+                            return (
+                              <div key={j} className="fg-row">
+                                <span className="fg-dot" style={{ background: '#9ca3af' }} />
+                                <span className="fg-name">{f.name}</span>
+                                <span className="fg-label fg-unknown">❓ 無法判斷</span>
+                              </div>
+                            );
+                          }
                           const fg = classifyFood(f);
                           return (
                             <div key={j} className="fg-row">
@@ -371,7 +414,7 @@ export default function MealLog() {
 
           <div className="btn-row">
             <button className="btn-primary" onClick={handleSave}
-              disabled={inputMode === 'manual' ? !manual.carbs : !form.foods}>
+              disabled={inputMode === 'manual' ? !manual.carbs : (!form.foods || analysis?.undetermined)}>
               {editIndex !== null ? '儲存變更' : '記錄這餐'}
             </button>
             <button className="btn-secondary" onClick={() => { setShowForm(false); setAnalysis(null); setEditIndex(null); }}>取消</button>
@@ -561,11 +604,20 @@ export default function MealLog() {
                   {m.exerciseAfter  && <span className="tag-blue">餐後運動</span>}
                 </div>
                 {(() => {
-                  const perFood = parseMealFoods(m.foods || '').filter(f => (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
+                  const perFood = parseMealFoods(m.foods || '').filter(f => f.undetermined || (f.carbs ?? 0) > 0 || (f.protein ?? 0) >= 25 || (f.fat ?? 0) >= 20);
                   if (perFood.length < 1) return null;
                   return (
                     <div className="food-glycemic-list">
                       {perFood.map((f, j) => {
+                        if (f.undetermined) {
+                          return (
+                            <div key={j} className="fg-row">
+                              <span className="fg-dot" style={{ background: '#9ca3af' }} />
+                              <span className="fg-name">{f.name}</span>
+                              <span className="fg-label fg-unknown">❓ 無法判斷</span>
+                            </div>
+                          );
+                        }
                         const g = classifyFood(f);
                         return (
                           <div key={j} className="fg-row">

@@ -111,6 +111,39 @@ export const FOOD_DB = [
   // ── 油脂 / 調味 ──
   { name: '沙拉醬', aliases: ['美乃滋', '千島醬'], unit: '匙', gram: 15, carbs: 2, protein: 0.2, fat: 10, calories: 98, gi: 0 },
   { name: '花生醬', aliases: ['花生', '花生粉'], unit: '匙', gram: 20, carbs: 4, protein: 4, fat: 8, calories: 104, gi: 14 },
+
+  // ── 升糖救急 / 糖類（低血糖補糖、純醣） ──
+  // 葡萄糖一包 ≈ 15 g 醣（標準補糖份量），純葡萄糖 GI 100。
+  { name: '葡萄糖', aliases: ['葡萄糖包', '葡萄糖粉', '糖包', '葡萄糖錠'], unit: '包', gram: 15, carbs: 15, protein: 0, fat: 0, calories: 60, gi: 100 },
+  { name: '方糖', aliases: ['砂糖', '白砂糖', '糖塊'], unit: '顆', gram: 5, carbs: 5, protein: 0, fat: 0, calories: 20, gi: 100 },
+  { name: '蜂蜜', aliases: ['蜂蜜水'], unit: '匙', gram: 21, carbs: 17, protein: 0.1, fat: 0, calories: 64, gi: 58 },
+  { name: '黑糖', aliases: ['紅糖', '二砂'], unit: '匙', gram: 12, carbs: 11, protein: 0, fat: 0, calories: 45, gi: 70 },
+
+  // ── 主食 / 早餐補充 ──
+  { name: '飯糰', aliases: ['御飯糰', '三角飯糰', '飯團'], unit: '個', gram: 180, carbs: 45, protein: 8, fat: 5, calories: 257, gi: 70 },
+  { name: '蛋餅', aliases: ['起司蛋餅', '蔬菜蛋餅'], unit: '份', gram: 120, carbs: 30, protein: 8, fat: 8, calories: 224, gi: 65 },
+  { name: '蘿蔔糕', aliases: ['菜頭粿', '港式蘿蔔糕'], unit: '塊', gram: 100, carbs: 26, protein: 2, fat: 3, calories: 139, gi: 80 },
+  { name: '燕麥', aliases: ['燕麥片', '麥片', '即食燕麥'], unit: '份', gram: 40, carbs: 26, protein: 5, fat: 3, calories: 155, gi: 55 },
+  { name: '貝果', aliases: ['bagel'], unit: '個', gram: 100, carbs: 50, protein: 9, fat: 2, calories: 261, gi: 69 },
+  { name: '蔥油餅', aliases: ['抓餅', '手抓餅'], unit: '份', gram: 120, carbs: 38, protein: 6, fat: 14, calories: 302, gi: 65 },
+  { name: '白稀飯', aliases: ['地瓜粥', '番薯粥'], unit: '碗', gram: 250, carbs: 32, protein: 2, fat: 0.3, calories: 138, gi: 78 },
+
+  // ── 常見料理（補強） ──
+  { name: '肉燥飯', aliases: ['魯肉飯', '肉臊飯'], unit: '碗', gram: 250, carbs: 48, protein: 10, fat: 12, calories: 340, gi: 72 },
+  { name: '咖哩飯', aliases: ['日式咖哩飯', '咖哩雞飯'], unit: '份', gram: 350, carbs: 70, protein: 12, fat: 12, calories: 436, gi: 70 },
+  { name: '義大利麵', aliases: ['義麵', '青醬義大利麵', '紅醬義大利麵', 'pasta'], unit: '份', gram: 300, carbs: 65, protein: 12, fat: 10, calories: 398, gi: 50 },
+  { name: '披薩', aliases: ['pizza', '比薩'], unit: '片', gram: 120, carbs: 35, protein: 12, fat: 12, calories: 296, gi: 60 },
+  { name: '漢堡', aliases: ['牛肉漢堡', '速食漢堡', 'burger'], unit: '個', gram: 220, carbs: 40, protein: 20, fat: 22, calories: 438, gi: 66 },
+  { name: '薯條', aliases: ['炸薯條', 'fries'], unit: '份', gram: 115, carbs: 42, protein: 4, fat: 16, calories: 328, gi: 75 },
+  { name: '蚵仔煎', aliases: ['蚵仔煎蛋'], unit: '份', gram: 200, carbs: 30, protein: 10, fat: 12, calories: 268, gi: 70 },
+  { name: '肉羹', aliases: ['肉羹麵', '肉羹湯', '魷魚羹'], unit: '碗', gram: 350, carbs: 40, protein: 14, fat: 8, calories: 288, gi: 65 },
+
+  // ── 水果（補強） ──
+  { name: '芭樂', aliases: ['番石榴'], unit: '顆', gram: 160, carbs: 16, protein: 2, fat: 0.5, calories: 76, gi: 31 },
+  { name: '梨子', aliases: ['水梨', '梨'], unit: '顆', gram: 200, carbs: 25, protein: 0.6, fat: 0.2, calories: 104, gi: 38 },
+  { name: '柿子', aliases: ['甜柿', '硬柿'], unit: '顆', gram: 150, carbs: 28, protein: 0.8, fat: 0.3, calories: 118, gi: 50 },
+  { name: '荔枝', aliases: ['玉荷包'], unit: '份', gram: 100, carbs: 17, protein: 0.8, fat: 0.4, calories: 73, gi: 57 },
+  { name: '龍眼', aliases: ['桂圓'], unit: '份', gram: 100, carbs: 15, protein: 1, fat: 0.1, calories: 65, gi: 52 },
 ];
 
 // Build lookup map: name/alias → entry
@@ -121,11 +154,20 @@ FOOD_DB.forEach(item => {
 });
 
 export function lookupFood(keyword) {
+  if (!keyword) return null;
   // Exact match first
   if (_lookup.has(keyword)) return _lookup.get(keyword);
-  // Partial match
+  // Partial match — require ≥2 chars on BOTH sides to avoid spurious hits
+  // (e.g. single char 「料」matching 「含糖飲料」, 「食」matching 「即食燕麥」).
+  if (keyword.length < 2) return null;
+  // Pick the LONGEST matching key so the most specific food wins
+  // (e.g. 「葡萄糖一包」matches 葡萄糖, not 葡萄).
+  let best = null, bestLen = 0;
   for (const [key, item] of _lookup) {
-    if (keyword.includes(key) || key.includes(keyword)) return item;
+    if (key.length < 2) continue;
+    if ((keyword.includes(key) || key.includes(keyword)) && key.length > bestLen) {
+      best = item; bestLen = key.length;
+    }
   }
-  return null;
+  return best;
 }

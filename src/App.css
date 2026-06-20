@@ -460,6 +460,20 @@ textarea { resize: vertical; }
 .conf-high { background: rgba(34,197,94,0.15); color: var(--green); }
 .conf-medium { background: rgba(245,158,11,0.15); color: var(--yellow); }
 .conf-low { background: rgba(239,68,68,0.15); color: var(--red); }
+.conf-partial { background: rgba(245,158,11,0.18); color: #9a6400; }
+.conf-undetermined { background: rgba(239,68,68,0.18); color: var(--red); }
+
+/* Undetermined-carb banner (cannot guess → push to manual) */
+.undetermined-banner { display: flex; gap: 8px; align-items: flex-start; background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 10px; margin-bottom: 10px; color: var(--red); font-size: 12.5px; }
+.undetermined-banner b { font-size: 13px; }
+.undetermined-sub { color: var(--text-secondary); font-size: 12px; line-height: 1.55; margin-top: 4px; }
+.btn-switch-manual { margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+  background: var(--red); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.partial-banner { display: flex; gap: 6px; align-items: flex-start; background: rgba(245,158,11,0.12);
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; line-height: 1.5; color: #9a6400; }
+.nv-unknown { font-size: 15px; font-weight: 700; color: var(--red); }
+.fg-unknown { color: #6b7280; font-weight: 600; }
 
 .detected-foods { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .food-tag { font-size: 12px; background: var(--surface2); padding: 3px 8px; border-radius: 12px; color: var(--text); }
