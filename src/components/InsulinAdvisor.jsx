@@ -59,6 +59,7 @@ export default function InsulinAdvisor() {
   });
   const [quickSaved, setQuickSaved] = useState(false);
   const [showInjForm, setShowInjForm] = useState(false);
+  const [showAllLogs, setShowAllLogs] = useState(false);
   const setQ = (k, v) => setQuickLog(q => ({ ...q, [k]: v }));
   const set  = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -851,11 +852,14 @@ export default function InsulinAdvisor() {
       {/* Recent logs */}
       <div className="card">
         <h3>最近注射紀錄</h3>
-        {state.insulinLogs
+        {(() => {
+        const sortedLogs = state.insulinLogs
           .map((l, i) => ({ ...l, _origIdx: i }))
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-          .slice(0, 15)
-          .map((l) => {
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const LOG_PREVIEW = 5;
+        const shownLogs = showAllLogs ? sortedLogs : sortedLogs.slice(0, LOG_PREVIEW);
+        return (<>
+        {shownLogs.map((l) => {
             const isShort = l.brandType === 'short' || INSULIN_BRANDS.short.find(b => b.name === l.brand);
             const isLong  = l.brandType === 'long' || INSULIN_BRANDS.long.find(b => b.name === l.brand);
             const isRapid = !isShort && !isLong;
@@ -931,6 +935,14 @@ export default function InsulinAdvisor() {
               </div>
             );
           })}
+        {sortedLogs.length > LOG_PREVIEW && (
+          <button className="btn-secondary full-width" style={{ marginTop: 4 }}
+            onClick={() => setShowAllLogs(s => !s)}>
+            {showAllLogs ? '收合' : `顯示更多（共 ${sortedLogs.length} 筆）`}
+          </button>
+        )}
+        </>);
+        })()}
         {state.insulinLogs.length === 0 && <div className="empty-state">尚無注射紀錄</div>}
       </div>
 

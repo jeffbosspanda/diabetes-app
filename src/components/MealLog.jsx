@@ -33,6 +33,7 @@ export default function MealLog() {
 
   // confirm dialog state
   const [confirm, setConfirm] = useState(null); // { type: 'delete'|'edit', index, data? }
+  const [showAllAdvice, setShowAllAdvice] = useState(false);
 
   // The add/edit form opens as a centered modal (see render) so editing a row
   // never scrolls the page back to the top — avoids confusing it with the input
@@ -561,18 +562,34 @@ export default function MealLog() {
             <TrendingUp size={14} color="var(--accent2)" />
             <h3>營養素分析與建議</h3>
           </div>
-          {nutrientAdvice.map((t, i) => (
-            <div key={`n-${i}`} className={`diet-tip diet-tip-${t.severity === 'warn' ? 'warn' : t.severity === 'neutral' ? 'neutral' : 'info'}`}>
-              <div className="tip-title">{t.title}</div>
-              <div className="tip-body">{t.body}</div>
-            </div>
-          ))}
-          {dietaryTips.map((tip, i) => (
-            <div key={`d-${i}`} className={`diet-tip diet-tip-${tip.severity}`}>
-              <div className="tip-title">{tip.title}</div>
-              <div className="tip-body">{tip.body}</div>
-            </div>
-          ))}
+          {(() => {
+            const ADVICE_PREVIEW = 3;
+            const allAdvice = [
+              ...nutrientAdvice.map((t, i) => ({
+                key: `n-${i}`,
+                cls: t.severity === 'warn' ? 'warn' : t.severity === 'neutral' ? 'neutral' : 'info',
+                title: t.title, body: t.body,
+              })),
+              ...dietaryTips.map((tip, i) => ({
+                key: `d-${i}`, cls: tip.severity, title: tip.title, body: tip.body,
+              })),
+            ];
+            const shown = showAllAdvice ? allAdvice : allAdvice.slice(0, ADVICE_PREVIEW);
+            return (<>
+              {shown.map(a => (
+                <div key={a.key} className={`diet-tip diet-tip-${a.cls}`}>
+                  <div className="tip-title">{a.title}</div>
+                  <div className="tip-body">{a.body}</div>
+                </div>
+              ))}
+              {allAdvice.length > ADVICE_PREVIEW && (
+                <button className="btn-secondary full-width" style={{ marginTop: 4 }}
+                  onClick={() => setShowAllAdvice(s => !s)}>
+                  {showAllAdvice ? '收合' : `顯示更多（共 ${allAdvice.length} 個建議）`}
+                </button>
+              )}
+            </>);
+          })()}
           {!dietaryNeeds && (
             <div className="hint" style={{ marginTop: 8 }}>
               前往「個人資料」填寫身高體重年齡可獲得更精準建議
