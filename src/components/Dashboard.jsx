@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../store/AppContext';
 import {
   Activity, Utensils, Syringe, User, AlertCircle, TrendingUp,
-  ChevronRight, ChevronLeft, Sun, Zap, Lightbulb, Navigation, Sparkles, ArrowUpRight, Trophy,
+  ChevronRight, ChevronLeft, Sun, Zap, Lightbulb, Navigation, Sparkles, ArrowUpRight, Trophy, RefreshCw,
 } from 'lucide-react';
 import {
   ComposedChart, Line, ReferenceLine, ReferenceArea, XAxis, YAxis, Tooltip,
@@ -15,6 +15,7 @@ import {
 } from '../utils/insulinCalculator';
 import { computeDailySummary } from '../utils/dailySummary';
 import { predictBG30 } from '../utils/bgPredictor';
+import { syncLibreData } from '../utils/libreLinkUp';
 import { computeMealPatternInsights } from '../utils/mealPatternInsights';
 import { computeAchievements } from '../utils/achievements';
 import { computeCyclePhase, analyzeCycleGlucoseImpact } from '../utils/cyclePhase';
@@ -135,8 +136,31 @@ function EventMarkerStrip({ events, windowStart, windowEnd }) {
 }
 
 export default function Dashboard() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const nav = useNavigate();
+
+  // Quick LibreLink sync straight from the dashboard (no jump to 血糖頁).
+  // Reuses the same authoritative-window reconciliation as LibreSync.
+  const [quickSyncing, setQuickSyncing] = useState(false);
+  const [quickSyncErr, setQuickSyncErr] = useState('');
+  const handleQuickSync = async () => {
+    const creds = state.settings.libreCredentials;
+    // No saved credentials → can't sync silently; send user to 血糖頁 to connect.
+    if (!creds?.username || !creds?.password) { nav('/glucose'); return; }
+    setQuickSyncErr('');
+    setQuickSyncing(true);
+    try {
+      const { readings } = await syncLibreData(creds.username, creds.password);
+      if (readings.length) dispatch({ type: 'RECONCILE_GLUCOSE', payload: readings });
+      dispatch({ type: 'UPDATE_SETTINGS', payload: {
+        integrations: { ...state.settings.integrations, freestyleLibre: true },
+      }});
+    } catch (err) {
+      setQuickSyncErr(err.message || '同步失敗，請稍後再試');
+    } finally {
+      setQuickSyncing(false);
+    }
+  };
 
   const insufficiencies = useMemo(() => checkDataSufficiency(state), [state]);
 
@@ -310,9 +334,11 @@ export default function Dashboard() {
                 ? `最近一筆血糖為 ${bgPrediction.minsSinceLast} 分鐘前${bgPrediction.lastValue != null ? `（${bgPrediction.lastValue} mg/dL）` : ''}，需 15 分鐘內的數據`
                 : '尚無血糖資料，請先同步 FreeStyle Libre'}
           </div>
-          <button className="btn-secondary bgp-idle-btn" onClick={() => nav('/glucose')}>
-            同步 LibreLink →
+          <button className="btn-secondary bgp-idle-btn" onClick={handleQuickSync} disabled={quickSyncing}>
+            <RefreshCw size={14} className={quickSyncing ? 'spin' : ''} />
+            {quickSyncing ? '同步中…' : '同步 LibreLink'}
           </button>
+          {quickSyncErr && <div className="bgp-idle-sub" style={{ color: 'var(--red)' }}>{quickSyncErr}</div>}
         </div>
       )}
 
@@ -539,8 +565,9 @@ export default function Dashboard() {
           <div className="timeline-empty" onClick={() => nav('/glucose')}>
             <Activity size={28} color="var(--text-secondary)" />
             <p>{isToday ? '尚無今日血糖資料' : `${format(new Date(`${selDay}T00:00:00`), 'M/d')} 無血糖資料`}</p>
-            <button className="btn-secondary" onClick={e => { e.stopPropagation(); nav('/glucose'); }}>
-              同步 LibreLink →
+            <button className="btn-secondary" onClick={e => { e.stopPropagation(); handleQuickSync(); }} disabled={quickSyncing}>
+              <RefreshCw size={14} className={quickSyncing ? 'spin' : ''} />
+              {quickSyncing ? '同步中…' : '同步 LibreLink'}
             </button>
           </div>
         )}
