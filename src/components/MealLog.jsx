@@ -185,7 +185,7 @@ export default function MealLog() {
 
       <div className="page-header">
         <Utensils size={22} /> <h2>飲食紀錄</h2>
-        <button className="btn-icon" onClick={openAdd}><Plus size={20} /></button>
+        <button className="btn-icon" onClick={openAdd}><Plus size={24} strokeWidth={2.5} /></button>
       </div>
 
       {showForm && (

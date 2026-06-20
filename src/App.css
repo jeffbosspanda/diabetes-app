@@ -173,10 +173,15 @@ textarea { resize: vertical; }
   display: flex; align-items: center; gap: 6px; font-size: 13px;
 }
 .btn-icon {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: 8px; padding: 6px; cursor: pointer; color: var(--text);
-  display: flex; align-items: center;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  border: none; border-radius: 12px; padding: 9px; cursor: pointer; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(15, 184, 166, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
+.btn-icon:hover { filter: brightness(1.05); box-shadow: 0 3px 12px rgba(15, 184, 166, 0.45); }
+.btn-icon:active { transform: scale(0.94); filter: brightness(0.95); box-shadow: 0 1px 4px rgba(15, 184, 166, 0.3); }
+.btn-icon:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(15, 184, 166, 0.3); }
 .btn-row { display: flex; gap: 8px; }
 .full-width { width: 100%; }
 
