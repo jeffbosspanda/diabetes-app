@@ -457,13 +457,13 @@ textarea { resize: vertical; }
 .btn-retry { background: var(--red); color: #fff; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 11px; margin-left: auto; }
 
 .analysis-card {
-  background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.25);
+  background: rgba(15,184,166,0.06); border: 1px solid rgba(15,184,166,0.28);
   border-radius: var(--radius); padding: 12px; margin-bottom: 12px;
 }
 .analysis-header { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--accent2); }
 .confidence-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: auto; }
 .conf-high { background: rgba(34,197,94,0.15); color: var(--green); }
-.conf-medium { background: rgba(245,158,11,0.15); color: var(--yellow); }
+.conf-medium { background: rgba(245,158,11,0.18); color: #b45309; }
 .conf-low { background: rgba(239,68,68,0.15); color: var(--red); }
 .conf-partial { background: rgba(245,158,11,0.18); color: #9a6400; }
 .conf-undetermined { background: rgba(239,68,68,0.18); color: var(--red); }
@@ -503,11 +503,11 @@ textarea { resize: vertical; }
 
 .diabetes-notes { font-size: 12px; color: var(--text-muted); background: var(--surface2); padding: 8px; border-radius: 6px; line-height: 1.5; }
 
-.tag-yellow { background: rgba(245,158,11,0.15) !important; color: var(--yellow) !important; }
+.tag-yellow { background: rgba(245,158,11,0.18) !important; color: #b45309 !important; }
 .meal-notes { font-size: 11px; color: var(--text-muted); margin-top: 4px; font-style: italic; }
 .meal-feedback { font-size: 11px; margin-top: 4px; line-height: 1.4; padding: 3px 8px; border-radius: 8px; }
 .meal-feedback-good { color: var(--accent-dark); background: rgba(15,184,166,0.10); }
-.meal-feedback-note { color: var(--yellow); background: rgba(240,169,59,0.10); }
+.meal-feedback-note { color: #b45309; background: rgba(240,169,59,0.14); }
 
 /* ── Inject type tabs ── */
 .inject-type-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -695,19 +695,20 @@ textarea { resize: vertical; }
   color: var(--text-muted);
 }
 .auto-bg-banner.auto-bg-warn {
-  background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.25); color: #f59e0b;
+  background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3); color: #b45309;
 }
 .bg-time-badge {
-  display: inline-block; background: rgba(99,102,241,0.15);
+  display: inline-block; background: rgba(15,184,166,0.15);
   color: var(--accent2); font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 5px;
 }
 
 .btn-analyze {
   display: flex; align-items: center; gap: 5px;
-  background: rgba(99,102,241,0.15); border: 1px solid var(--accent);
-  color: var(--accent2); border-radius: 8px; padding: 7px 14px;
+  background: rgba(15,184,166,0.12); border: 1px solid var(--accent);
+  color: var(--accent-dark); border-radius: 8px; padding: 7px 14px;
   cursor: pointer; font-size: 13px; margin-bottom: 10px;
 }
+.btn-analyze:hover:not(:disabled) { background: rgba(15,184,166,0.2); }
 .btn-analyze:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .inject-type-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -793,7 +794,12 @@ textarea { resize: vertical; }
 .meal-form-modal {
   width: 100%; max-width: 460px; margin: auto;
   max-height: calc(100vh - 48px); overflow-y: auto;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+  /* Opaque solid surface — sits over a dark backdrop, so glass translucency
+     muddied the text. Solid white keeps all content crisp & readable. */
+  background: var(--surface-solid);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 12px 40px rgba(15, 48, 44, 0.4);
 }
 .meal-form-modal-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -1067,7 +1073,7 @@ textarea { resize: vertical; }
   background: var(--surface2); color: var(--text-muted); cursor: pointer; font-size: 12px;
   transition: border-color 0.15s, color 0.15s;
 }
-.mode-tab-active { border-color: var(--accent); color: var(--accent2); background: rgba(99,102,241,0.08); }
+.mode-tab-active { border-color: var(--accent); color: var(--accent2); background: rgba(15,184,166,0.10); }
 
 /* ── Manual nutrition input ── */
 .manual-nutrition { display: flex; flex-direction: column; gap: 10px; }
