@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../store/AppContext';
-import { Syringe, AlertTriangle, CheckCircle, Info, Plus, Zap, Moon, Settings, Pencil, Trash2, Clock } from 'lucide-react';
+import { Syringe, AlertTriangle, CheckCircle, Info, Plus, Zap, Moon, Settings, Pencil, Trash2, Clock, X } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import {
   checkDataSufficiency, calculateTDD, deriveICRandISF,
@@ -58,6 +58,7 @@ export default function InsulinAdvisor() {
     timestamp: nowLocal(), notes: '',
   });
   const [quickSaved, setQuickSaved] = useState(false);
+  const [showInjForm, setShowInjForm] = useState(false);
   const setQ = (k, v) => setQuickLog(q => ({ ...q, [k]: v }));
   const set  = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -68,6 +69,14 @@ export default function InsulinAdvisor() {
       setQ('brandType', availableTypes[0]);
     }
   }, [availableTypes, quickLog.brandType]);
+
+  // Lock body scroll while the manual-injection modal is open (same pattern as MealLog)
+  useEffect(() => {
+    if (!showInjForm) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [showInjForm]);
 
   // edit / delete state for injection logs
   const [logConfirm, setLogConfirm]   = useState(null); // { index: origIdx }
@@ -275,10 +284,16 @@ export default function InsulinAdvisor() {
       },
     });
     setQuickSaved(true);
+    setShowInjForm(false);
     setTimeout(() => {
       setQuickSaved(false);
       setQuickLog(q => ({ ...q, units: '', notes: '', timestamp: nowLocal() }));
     }, 1500);
+  };
+
+  const openInjForm = () => {
+    setQuickLog(q => ({ ...q, units: '', notes: '', timestamp: nowLocal() }));
+    setShowInjForm(true);
   };
 
   const tddSourceLabel = {
@@ -314,6 +329,7 @@ export default function InsulinAdvisor() {
 
       <div className="page-header">
         <Syringe size={22} /> <h2>胰島素劑量建議</h2>
+        <button className="btn-icon" onClick={openInjForm} title="手動記錄注射"><Plus size={24} strokeWidth={2.5} /></button>
       </div>
 
       {/* Data warnings (soft — don't block) */}
@@ -748,76 +764,89 @@ export default function InsulinAdvisor() {
         </div>
       )}
 
-      {/* ── Quick manual injection log ── */}
-      <div className="card">
-        <h3><Plus size={14} /> 手動記錄注射</h3>
-        <div className="confirmed-brand-bar" style={{ marginBottom: 10 }}>
-          {availableTypes.map(t => (
-            <span key={t} className={TYPE_META[t].tagClass}>{TYPE_META[t].emoji} {TYPE_META[t].brand}</span>
-          ))}
-          <button className="btn-brand-change" onClick={() => nav('/settings')}>
-            <Settings size={11} /> 更換
-          </button>
-        </div>
-
-        {availableTypes.length === 0 ? (
-          <p className="hint">尚未設定任何胰島素品牌，請先到「設定」選擇品牌。</p>
-        ) : (
-          <div className="inject-type-tabs">
-            {availableTypes.map(t => {
-              const { label, brand, activeClass, Icon } = TYPE_META[t];
-              return (
-                <button key={t} className={`inject-tab ${quickLog.brandType === t ? activeClass : ''}`}
-                  onClick={() => setQ('brandType', t)}>
-                  <Icon size={13} /> {label}（{brand}）
-                </button>
-              );
-            })}
+      {/* ── Quick manual injection log (modal, opened from header +) ── */}
+      {showInjForm && (
+        <div className="meal-form-overlay">
+        <div className="card form-card meal-form-modal">
+          <div className="meal-form-modal-head">
+            <h3><Plus size={16} /> 手動記錄注射</h3>
+            <button className="meal-form-close" onClick={() => setShowInjForm(false)} aria-label="關閉">
+              <X size={18} />
+            </button>
           </div>
-        )}
 
-        <div className="form-grid">
-          <div className="form-group">
-            <label>注射劑量 (U)</label>
-            <input type="number" step="0.5" min="0" value={quickLog.units}
-              onChange={e => setQ('units', e.target.value)} placeholder="單位 U" />
+          <div className="confirmed-brand-bar" style={{ marginBottom: 10 }}>
+            {availableTypes.map(t => (
+              <span key={t} className={TYPE_META[t].tagClass}>{TYPE_META[t].emoji} {TYPE_META[t].brand}</span>
+            ))}
+            <button className="btn-brand-change" onClick={() => nav('/settings')}>
+              <Settings size={11} /> 更換
+            </button>
           </div>
-          {(quickLog.brandType === 'rapid' || quickLog.brandType === 'short') && (
-            <div className="form-group">
-              <label>用餐類型</label>
-              <select value={quickLog.mealType} onChange={e => setQ('mealType', e.target.value)}>
-                <option value="breakfast">早餐</option>
-                <option value="lunch">午餐</option>
-                <option value="dinner">晚餐</option>
-                <option value="lateSnack">宵夜</option>
-                <option value="snack">點心</option>
-                <option value="correction">校正劑量</option>
-              </select>
+
+          {availableTypes.length === 0 ? (
+            <p className="hint">尚未設定任何胰島素品牌，請先到「設定」選擇品牌。</p>
+          ) : (
+            <div className="inject-type-tabs">
+              {availableTypes.map(t => {
+                const { label, brand, activeClass, Icon } = TYPE_META[t];
+                return (
+                  <button key={t} className={`inject-tab ${quickLog.brandType === t ? activeClass : ''}`}
+                    onClick={() => setQ('brandType', t)}>
+                    <Icon size={13} /> {label}（{brand}）
+                  </button>
+                );
+              })}
             </div>
           )}
-          {quickLog.brandType === 'long' && (
+
+          <div className="form-grid">
             <div className="form-group">
-              <label>注射時機</label>
-              <select value={quickLog.mealType} onChange={e => setQ('mealType', e.target.value)}>
-                <option value="bedtime">睡前</option>
-                <option value="morning">早晨</option>
-                <option value="other">其他</option>
-              </select>
+              <label>注射劑量 (U)</label>
+              <input type="number" step="0.5" min="0" value={quickLog.units}
+                onChange={e => setQ('units', e.target.value)} placeholder="單位 U" />
             </div>
-          )}
-          <div className="form-group" style={{ gridColumn: 'span 2' }}>
-            <label>注射時間</label>
-            <input type="datetime-local" value={quickLog.timestamp}
-              onChange={e => setQ('timestamp', e.target.value)} />
+            {(quickLog.brandType === 'rapid' || quickLog.brandType === 'short') && (
+              <div className="form-group">
+                <label>用餐類型</label>
+                <select value={quickLog.mealType} onChange={e => setQ('mealType', e.target.value)}>
+                  <option value="breakfast">早餐</option>
+                  <option value="lunch">午餐</option>
+                  <option value="dinner">晚餐</option>
+                  <option value="lateSnack">宵夜</option>
+                  <option value="snack">點心</option>
+                  <option value="correction">校正劑量</option>
+                </select>
+              </div>
+            )}
+            {quickLog.brandType === 'long' && (
+              <div className="form-group">
+                <label>注射時機</label>
+                <select value={quickLog.mealType} onChange={e => setQ('mealType', e.target.value)}>
+                  <option value="bedtime">睡前</option>
+                  <option value="morning">早晨</option>
+                  <option value="other">其他</option>
+                </select>
+              </div>
+            )}
+            <div className="form-group" style={{ gridColumn: 'span 2' }}>
+              <label>注射時間</label>
+              <input type="datetime-local" value={quickLog.timestamp}
+                onChange={e => setQ('timestamp', e.target.value)} />
+            </div>
+          </div>
+          <input value={quickLog.notes} onChange={e => setQ('notes', e.target.value)}
+            placeholder="備註（選填）" style={{ marginBottom: 10 }} />
+          <div className="btn-row">
+            <button className="btn-primary" style={{ flex: 1 }} onClick={handleQuickLog}
+              disabled={!quickLog.units || quickSaved}>
+              {quickSaved ? <><CheckCircle size={14} /> 已記錄！</> : <><Syringe size={14} /> 記錄注射</>}
+            </button>
+            <button className="btn-secondary" onClick={() => setShowInjForm(false)}>取消</button>
           </div>
         </div>
-        <input value={quickLog.notes} onChange={e => setQ('notes', e.target.value)}
-          placeholder="備註（選填）" style={{ marginBottom: 10 }} />
-        <button className="btn-primary full-width" onClick={handleQuickLog}
-          disabled={!quickLog.units || quickSaved}>
-          {quickSaved ? <><CheckCircle size={14} /> 已記錄！</> : <><Syringe size={14} /> 記錄注射</>}
-        </button>
-      </div>
+        </div>
+      )}
 
       {/* Recent logs */}
       <div className="card">
