@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../store/AppContext';
 import {
@@ -20,6 +20,7 @@ import { computeMealPatternInsights } from '../utils/mealPatternInsights';
 import { computeAchievements } from '../utils/achievements';
 import { computeCyclePhase, analyzeCycleGlucoseImpact } from '../utils/cyclePhase';
 import { format, subDays } from 'date-fns';
+import { parseMealFoods } from '../utils/foodParser';
 
 // ── High-contrast palette ───────────────────────────────────────────────────
 // Meals are ALL blue (regardless of type); insulin & BG use distinct hues.
@@ -62,6 +63,147 @@ function TimelineTooltip({ active, payload }) {
           {d.v} mg/dL
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Glycemic impact curve profiles (research-backed timing) ──────────────────
+// High vs low GI peak difference ~17 min: PMC3571634
+// Fat/protein delays gastric emptying 30–60 min, pushes peak to 2–4 h: PMC7352659
+const GI_VIS = {
+  fast:       { lagMin: 0,  peakMin: 45,  durMin: 150, color: '#e08585', zh: '高GI快速' },
+  medium:     { lagMin: 10, peakMin: 65,  durMin: 195, color: '#e8a84a', zh: '中GI緩升' },
+  low:        { lagMin: 15, peakMin: 90,  durMin: 255, color: '#5cb89a', zh: '低GI緩慢' },
+  fatProtein: { lagMin: 40, peakMin: 150, durMin: 360, color: '#7f9cc4', zh: '高脂蛋白延遲' },
+  minimal:    { lagMin: 0,  peakMin: 30,  durMin: 90,  color: '#a8c0a8', zh: '低影響' },
+};
+function foodGIProfile(food) {
+  if ((food.fat ?? 0) >= 15 || (food.protein ?? 0) >= 20) return GI_VIS.fatProtein;
+  const gi = food.gi;
+  if (gi == null) return GI_VIS.low;           // unknown → conservative
+  if (gi >= 70) return GI_VIS.fast;
+  if (gi >= 56) return GI_VIS.medium;
+  if ((food.carbs ?? 0) < 4) return GI_VIS.minimal;
+  return GI_VIS.low;
+}
+
+// Triangular absorption curve: 0 at lag, rises to 1 at peak, falls to 0 at lag+dur.
+function curveNorm(mMin, lagMin, peakMin, durMin) {
+  const t = mMin - lagMin;
+  if (t <= 0 || t >= durMin) return 0;
+  const pRel = peakMin - lagMin;
+  return t <= pRel ? t / pRel : Math.max(0, 1 - (t - pRel) / (durMin - pRel));
+}
+
+function GlycemicImpactCurves({ meals, windowStart, windowEnd, xTicks }) {
+  const wrapRef = useRef(null);
+  const [plotW, setPlotW] = useState(260);
+
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([e]) => setPlotW(Math.max(1, e.contentRect.width - LABEL_W - CHART_R)));
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const span = windowEnd - windowStart;
+  const PLOT_H = 56;   // baseline y in SVG
+  const SVG_H  = 74;   // total SVG height (includes x-axis text)
+  const TOP_PAD = 14;  // space above curves for peak labels
+
+  const xPx = (ts) => LABEL_W + Math.max(0, Math.min(1, (ts - windowStart) / span)) * plotW;
+  const yPx = (norm, mag) => PLOT_H - TOP_PAD - norm * mag * (PLOT_H - TOP_PAD - 4);
+
+  const foodData = useMemo(() => {
+    const all = [];
+    for (const meal of meals) {
+      const mealTs = new Date(meal.timestamp).getTime();
+      let foods = parseMealFoods(meal.foods || '')
+        .filter(f => !f.undetermined && ((f.carbs ?? 0) >= 3 || (f.fat ?? 0) >= 12 || (f.protein ?? 0) >= 15));
+      if (!foods.length) {
+        const gi = (meal.highGI?.length ?? 0) > 0 ? 75 : 50;
+        foods = [{ name: MEAL_LABELS[meal.mealType] || '餐', carbs: meal.carbs ?? 10, protein: meal.protein ?? 0, fat: meal.fat ?? 0, gi }];
+      }
+      for (const food of foods) {
+        const prof = foodGIProfile(food);
+        const mag  = Math.min(1, Math.max(0.22, (food.carbs ?? 5) / 38));
+        all.push({ mealTs, prof, mag, name: (food.name || '食物').slice(0, 6) });
+      }
+    }
+    return all;
+  }, [meals]);
+
+  if (!foodData.length) return null;
+
+  // Build SVG paths — recomputed whenever plotW is measured
+  const areas = [], curves = [], labels = [];
+  for (const { mealTs, prof, mag } of foodData) {
+    const STEP = 3; // minutes per sample
+    const pts = [];
+    for (let m = 0; m <= prof.durMin + STEP; m += STEP) {
+      const ts = mealTs + m * 60000;
+      const norm = curveNorm(m, prof.lagMin, prof.peakMin, prof.durMin);
+      pts.push({ x: xPx(ts), y: yPx(norm, mag) });
+    }
+    const vis = pts.filter(p => p.x > LABEL_W - 6 && p.x < LABEL_W + plotW + 6);
+    if (vis.length < 2) continue;
+
+    const pathD = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+    const areaD = `${pathD}L${pts[pts.length-1].x.toFixed(1)},${PLOT_H}L${pts[0].x.toFixed(1)},${PLOT_H}Z`;
+    const n = areas.length;
+    areas.push(<path key={`a${n}`} d={areaD} fill={prof.color} opacity={0.12} />);
+    curves.push(<path key={`l${n}`} d={pathD} fill="none" stroke={prof.color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" opacity={0.88} />);
+
+    // Peak annotation: type label + clock time
+    const peakTs = mealTs + prof.peakMin * 60000;
+    const px = xPx(peakTs);
+    const py = yPx(mag, mag) - 2;   // top of the peak
+    if (px > LABEL_W + 12 && px < LABEL_W + plotW - 12) {
+      labels.push(
+        <g key={`pk${n}`}>
+          <text x={px} y={Math.max(9, py - 8)} textAnchor="middle" fontSize={7.5} fontWeight="700" fill={prof.color} opacity={0.92}>{prof.zh}</text>
+          <text x={px} y={Math.max(17, py)}     textAnchor="middle" fontSize={7.5} fill={prof.color} opacity={0.72}>{format(new Date(peakTs), 'HH:mm')}</text>
+        </g>
+      );
+    }
+  }
+
+  return (
+    <div className="gi-curves" ref={wrapRef}>
+      <div className="gi-header">
+        <span className="gi-title">食物血糖影響估算</span>
+        <div className="gi-legend">
+          {Object.values(GI_VIS).map(p => (
+            <span key={p.zh} className="gi-legend-item">
+              <span className="gi-dot" style={{ background: p.color }} />{p.zh}
+            </span>
+          ))}
+        </div>
+      </div>
+      <svg width="100%" height={SVG_H} className="gi-svg">
+        {areas}{curves}
+        {/* baseline */}
+        <line x1={LABEL_W} y1={PLOT_H} x2={LABEL_W + plotW} y2={PLOT_H} stroke="var(--border)" strokeWidth={0.8} />
+        {/* peak labels */}
+        {labels}
+        {/* x-axis ticks + time labels */}
+        {xTicks.map((ts, i) => {
+          const x = xPx(ts);
+          if (x < LABEL_W || x > LABEL_W + plotW) return null;
+          return (
+            <g key={i}>
+              <line x1={x} y1={PLOT_H} x2={x} y2={PLOT_H + 3} stroke="var(--text-muted)" strokeWidth={0.7} />
+              <text x={x} y={SVG_H - 1} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{format(new Date(ts), 'HH:mm')}</text>
+            </g>
+          );
+        })}
+        {/* y-axis hint */}
+        <text
+          x={LABEL_W - 4} y={PLOT_H / 2 + TOP_PAD / 2}
+          textAnchor="middle" fontSize={8} fill="var(--text-muted)"
+          transform={`rotate(-90,${LABEL_W - 14},${(PLOT_H + TOP_PAD) / 2})`}
+        >影響</text>
+      </svg>
     </div>
   );
 }
@@ -608,6 +750,16 @@ export default function Dashboard() {
                 {/* Event timing now lives in the aligned Gantt below the chart. */}
               </ComposedChart>
             </ResponsiveContainer>
+
+            {/* Glycemic impact curves — per-food GI-based predicted BG effect */}
+            {mealEvents.length > 0 && (
+              <GlycemicImpactCurves
+                meals={mealEvents}
+                windowStart={xDomain[0]}
+                windowEnd={xDomain[1]}
+                xTicks={xTicks}
+              />
+            )}
 
             {/* Action Gantt — meals + insulin duration, x-aligned to the curve.
                 ganttInsulinEvents includes adjacent-day injections still active. */}
