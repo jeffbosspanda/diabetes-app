@@ -6,12 +6,12 @@ import {
   ChevronRight, ChevronLeft, Sun, Zap, Lightbulb, Navigation, Sparkles, ArrowUpRight, Trophy, RefreshCw,
 } from 'lucide-react';
 import {
-  ComposedChart, Line, ReferenceLine, ReferenceArea, XAxis, YAxis, Tooltip,
+  ComposedChart, ReferenceLine, ReferenceArea, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Area,
 } from 'recharts';
 import {
   checkDataSufficiency, getBGStatus, calculateTDD,
-  deriveICRandISF, estimateTDDFromWeight,
+  deriveICRandISF, estimateTDDFromWeight, BRAND_PHARMA,
 } from '../utils/insulinCalculator';
 import { computeDailySummary } from '../utils/dailySummary';
 import { predictBG30 } from '../utils/bgPredictor';
@@ -19,7 +19,7 @@ import { syncLibreData } from '../utils/libreLinkUp';
 import { computeMealPatternInsights } from '../utils/mealPatternInsights';
 import { computeAchievements } from '../utils/achievements';
 import { computeCyclePhase, analyzeCycleGlucoseImpact } from '../utils/cyclePhase';
-import { format, subHours, subDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
 // ── High-contrast palette ───────────────────────────────────────────────────
 // Meals are ALL blue (regardless of type); insulin & BG use distinct hues.
@@ -30,9 +30,6 @@ const LONG_COLOR  = '#a855f7'; // 長效 long-acting → purple
 const insulinColor = (bt) => (bt === 'long' ? LONG_COLOR : bt === 'short' ? SHORT_COLOR : RAPID_COLOR);
 const insulinTypeLabel = (bt) => (bt === 'long' ? '長效' : bt === 'short' ? '短效' : '速效');
 const BG_COLOR    = '#0e9488'; // BG line → teal (high contrast on warm-white)
-
-// per-type lookup kept for labels only; every type maps to the same blue
-const MEAL_COLORS = { breakfast: MEAL_COLOR, lunch: MEAL_COLOR, dinner: MEAL_COLOR, lateSnack: MEAL_COLOR, snack: MEAL_COLOR };
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', lateSnack: '宵夜', snack: '點心' };
 
 // Qualitative influence label — direction + coarse magnitude (no precise number,
@@ -69,68 +66,108 @@ function TimelineTooltip({ active, payload }) {
   );
 }
 
-// ── HTML marker strip (above chart, no SVG coordinate system issues) ─────────
-// CHART_L = left offset of chart drawing area = YAxis width + left-margin offset
-const CHART_L = 24; // 34px YAxis width + (-10) left margin
-const CHART_R = 12; // right margin
+// ── Action Gantt geometry — aligned to the BG chart's plot area ──────────────
+// LABEL_W matches the chart's YAxis width so block x-positions line up with the
+// glucose curve above; CHART_R matches the chart's right margin.
+const LABEL_W = 36;
+const CHART_R = 12;
+const GANTT_ROW_H = 26;
+const MEAL_ABSORB_H = 2.5; // rough carb-absorption window for the meal lane
 
-// Lane height per stacked row, and the minimum horizontal gap (% of plot width)
-// two chips must keep before they're considered overlapping.
-const LANE_H = 26;
-const MIN_GAP_PCT = 8;
-const MAX_LANES = 3;
+// Total action duration (hours): long-acting per brand; bolus from BRAND_PHARMA.
+const LONG_DURATION_H = { Lantus: 24, Toujeo: 36, Tresiba: 42, Levemir: 22, Basaglar: 24 };
+function insulinActionH(brand, brandType) {
+  if (brandType === 'long') return LONG_DURATION_H[brand] ?? 24;
+  const p = BRAND_PHARMA[brand];
+  return p ? p.iobHours : (brandType === 'short' ? 7 : 4);
+}
+// Peak time (hours) places the gradient's brightest point; null = flat basal.
+function insulinPeakH(brandType) {
+  if (brandType === 'long') return null;
+  return brandType === 'short' ? 3 : 1.5;
+}
 
-function EventMarkerStrip({ events, windowStart, windowEnd }) {
+function withA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// 3-lane Gantt: meals + long-acting + rapid/short. Insulin is drawn as colour
+// blocks whose length = duration of action and whose gradient marks the
+// onset→peak→taper; the left edge of every block is the exact event time.
+function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
   const span = windowEnd - windowStart;
   const pct = (ts) => Math.max(0, Math.min(100, (ts - windowStart) / span * 100));
+  const place = (startTs, durH) => {
+    const left = pct(startTs);
+    const right = pct(startTs + durH * 3600000);
+    return { left, width: Math.max(1.5, right - left) };
+  };
 
-  // Assign each chip to a lane so time-adjacent markers stack vertically instead
-  // of overprinting each other. Greedy first-fit by ascending time.
-  const sorted = [...events]
-    .map(ev => ({ ev, p: pct(new Date(ev.timestamp).getTime()) }))
-    .sort((a, b) => a.p - b.p);
-  const laneLastX = []; // last placed x% per lane
-  const placed = sorted.map(item => {
-    let lane = laneLastX.findIndex(x => item.p - x >= MIN_GAP_PCT);
-    if (lane === -1) {
-      if (laneLastX.length < MAX_LANES) { lane = laneLastX.length; laneLastX.push(item.p); }
-      else { // out of lanes — reuse the lane whose last marker is furthest left
-        lane = laneLastX.indexOf(Math.min(...laneLastX));
-        laneLastX[lane] = item.p;
-      }
-    } else {
-      laneLastX[lane] = item.p;
-    }
-    return { ...item, lane };
+  const mealBlocks = meals.map((m, i) => {
+    const start = new Date(m.timestamp).getTime();
+    const { left, width } = place(start, MEAL_ABSORB_H);
+    return {
+      key: `m${i}`, left, width, border: MEAL_COLOR,
+      bg: `linear-gradient(90deg, ${withA(MEAL_COLOR, 0.78)} 0%, ${withA(MEAL_COLOR, 0.12)} 100%)`,
+      label: `${MEAL_LABELS[m.mealType] || '餐'}${m.carbs ? ` ${m.carbs}g` : ''}`,
+      title: `${MEAL_LABELS[m.mealType] || '餐'} · ${format(new Date(start), 'HH:mm')}${m.carbs ? ` · ${m.carbs}g 醣` : ''}`,
+    };
   });
-  const laneCount = Math.max(1, laneLastX.length);
+
+  const insulinBlock = (l, i) => {
+    const start = new Date(l.timestamp).getTime();
+    const durH = insulinActionH(l.brand, l.brandType);
+    const peakH = insulinPeakH(l.brandType);
+    const { left, width } = place(start, durH);
+    const color = insulinColor(l.brandType);
+    const bg = peakH == null
+      ? withA(color, 0.42)
+      : `linear-gradient(90deg, ${withA(color, 0.14)} 0%, ${withA(color, 0.88)} ${Math.min(60, peakH / durH * 100)}%, ${withA(color, 0.18)} 100%)`;
+    return {
+      key: `i${i}`, left, width, bg, border: color,
+      label: `${l.units}U`,
+      title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(start), 'HH:mm')} · 作用約 ${durH}h`,
+    };
+  };
+  const longBlocks  = insulin.filter(l => l.brandType === 'long').map(insulinBlock);
+  // Draw longer blocks first (behind) so a shorter overlapping dose stays readable.
+  const bolusBlocks = insulin.filter(l => l.brandType !== 'long').map(insulinBlock)
+    .sort((a, b) => b.width - a.width);
+
+  const lanes = [
+    { key: 'meal',  label: '餐點',      blocks: mealBlocks },
+    { key: 'long',  label: '長效',      blocks: longBlocks },
+    { key: 'bolus', label: '速效\n短效', blocks: bolusBlocks },
+  ];
 
   return (
-    <div className="marker-strip" style={{ position: 'relative', height: laneCount * LANE_H, marginBottom: 0 }}>
-      {placed.map(({ ev, p, lane }, i) => {
-        const isMeal = ev._type === 'meal';
-        const color = isMeal ? MEAL_COLOR : insulinColor(ev.brandType);
-        const label = isMeal
-          ? (MEAL_LABELS[ev.mealType] || '餐')[0]
-          : `${ev.units}U`;
-        return (
-          <div key={i} className="ev-chip" style={{
-            left: `calc(${CHART_L}px + (100% - ${CHART_L + CHART_R}px) * ${p / 100})`,
-            top: lane * LANE_H,
-          }}>
-            {isMeal ? (
-              <div className="ev-chip-circle" style={{ background: color }}>{label}</div>
-            ) : (
-              <div className="ev-chip-tri" style={{ color }}>
-                <svg width="12" height="10" viewBox="0 0 12 10">
-                  <polygon points="6,0 0,10 12,10" fill={color} opacity={0.9} />
-                </svg>
-                <span>{label}</span>
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className="gantt">
+      <div className="gantt-hint">區塊長度 = 作用持續時間 · 左緣 = 施打時間</div>
+      {lanes.map(lane => (
+        <div className="gantt-row" key={lane.key} style={{ height: GANTT_ROW_H }}>
+          <span className="gantt-label">{lane.label}</span>
+          <div className="gantt-baseline" style={{ left: LABEL_W, right: CHART_R }} />
+          {lane.blocks.map(b => (
+            <div
+              key={b.key}
+              className="gantt-block"
+              title={b.title}
+              style={{
+                left: `calc(${LABEL_W}px + (100% - ${LABEL_W + CHART_R}px) * ${b.left / 100})`,
+                width: `calc((100% - ${LABEL_W + CHART_R}px) * ${b.width / 100})`,
+                background: b.bg,
+                borderLeft: `2px solid ${b.border}`,
+              }}
+            >
+              <span className="gantt-block-label">{b.label}</span>
+            </div>
+          ))}
+          {lane.blocks.length === 0 && (
+            <span className="gantt-empty" style={{ left: LABEL_W + 6 }}>無</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -495,18 +532,8 @@ export default function Dashboard() {
         <div className={`day-slide ${slideDir}`} key={selDay}>
         {hasTimeline ? (
           <>
-            {/* HTML marker strip — positioned above chart, aligned to chart drawing area */}
-            <EventMarkerStrip
-              events={[
-                ...mealEvents.map(m => ({ ...m, _type: 'meal' })),
-                ...insulinEvents.map(l => ({ ...l, _type: 'insulin' })),
-              ]}
-              windowStart={xDomain[0]}
-              windowEnd={xDomain[1]}
-            />
-
             <ResponsiveContainer width="100%" height={190}>
-              <ComposedChart data={bgPoints} margin={{ top: 8, right: 12, bottom: 4, left: -10 }}>
+              <ComposedChart data={bgPoints} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
                 <defs>
                   <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor={BG_COLOR} stopOpacity={0.22} />
@@ -529,7 +556,7 @@ export default function Dashboard() {
                   domain={[yMin, yMax]}
                   ticks={yTicks}
                   tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
-                  width={34}
+                  width={36}
                 />
                 <Tooltip content={<TimelineTooltip />} />
 
@@ -548,10 +575,17 @@ export default function Dashboard() {
                   connectNulls
                 />
 
-                {/* Event timing is shown by the aligned marker strip above the
-                    chart — no full-height vertical lines (they cluttered the curve). */}
+                {/* Event timing now lives in the aligned Gantt below the chart. */}
               </ComposedChart>
             </ResponsiveContainer>
+
+            {/* Action Gantt — meals + insulin duration, x-aligned to the curve */}
+            <ActionGantt
+              meals={mealEvents}
+              insulin={insulinEvents}
+              windowStart={xDomain[0]}
+              windowEnd={xDomain[1]}
+            />
           </>
         ) : (
           <div className="timeline-empty" onClick={() => nav('/glucose')}>
