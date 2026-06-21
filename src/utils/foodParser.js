@@ -234,14 +234,26 @@ export function parseMealText(text) {
   };
 }
 
+// "無糖" prefix means the user explicitly says no sugar — zero out carbs/GI so
+// a substring match on the food name (e.g. "紅茶" inside "無糖紅茶") can never
+// pull in a sugary DB entry by accident.
+const NO_SUGAR_PREFIX = /^(無糖|不加糖|去糖|零糖|0糖)/;
+
 function trySubstring(foodText) {
+  const noSugar = NO_SUGAR_PREFIX.test(foodText);
   // Only substrings of length ≥2 — single-char fragments produce false matches
   // (and real single-char foods like 飯/蛋/菜 already hit the exact lookup).
   for (let len = foodText.length; len >= 2; len--) {
     for (let start = 0; start <= foodText.length - len; start++) {
       const sub = foodText.slice(start, start + len);
       const candidate = lookupFood(sub);
-      if (candidate) return candidate;
+      if (candidate) {
+        if (noSugar && candidate.carbs > 0) {
+          // Strip carbs/GI — the user said no sugar, trust them over the DB match.
+          return { ...candidate, carbs: 0, calories: Math.round(candidate.protein * 4 + candidate.fat * 9), gi: 0 };
+        }
+        return candidate;
+      }
     }
   }
   return null;

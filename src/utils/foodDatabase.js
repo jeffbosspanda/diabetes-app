@@ -99,7 +99,9 @@ export const FOOD_DB = [
   { name: '豆漿', aliases: ['無糖豆漿', '黃豆漿'], unit: '杯', gram: 240, carbs: 8, protein: 9, fat: 4, calories: 104, gi: 34 },
   { name: '含糖豆漿', aliases: ['甜豆漿', '有糖豆漿'], unit: '杯', gram: 240, carbs: 22, protein: 9, fat: 4, calories: 160, gi: 44 },
   { name: '果汁', aliases: ['柳橙汁', '蘋果汁', '葡萄汁'], unit: '杯', gram: 240, carbs: 28, protein: 0.5, fat: 0.2, calories: 116, gi: 55 },
-  { name: '含糖飲料', aliases: ['可樂', '汽水', '珍珠奶茶', '奶茶', '綠茶飲料', '紅茶'], unit: '杯', gram: 350, carbs: 42, protein: 0, fat: 0, calories: 168, gi: 63 },
+  { name: '含糖飲料', aliases: ['可樂', '汽水', '珍珠奶茶', '奶茶', '綠茶飲料'], unit: '杯', gram: 350, carbs: 42, protein: 0, fat: 0, calories: 168, gi: 63 },
+  { name: '無糖茶', aliases: ['無糖紅茶', '無糖綠茶', '無糖烏龍', '無糖烏龍茶', '無糖茉莉茶', '無糖麥茶', '黑茶', '紅茶', '綠茶', '烏龍茶', '茶'], unit: '杯', gram: 250, carbs: 0, protein: 0, fat: 0, calories: 0, gi: 0 },
+  { name: '含糖紅茶', aliases: ['紅茶拿鐵', '奶茶紅茶'], unit: '杯', gram: 350, carbs: 35, protein: 1, fat: 2, calories: 160, gi: 60 },
 
   // ── 點心 / 甜食 ──
   { name: '蛋糕', aliases: ['海綿蛋糕', '戚風蛋糕', '起司蛋糕'], unit: '片', gram: 80, carbs: 36, protein: 4, fat: 8, calories: 232, gi: 77 },
