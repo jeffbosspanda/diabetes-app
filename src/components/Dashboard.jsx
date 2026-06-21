@@ -279,6 +279,16 @@ export default function Dashboard() {
   const yMin = allBGValues.length ? Math.max(40, Math.min(...allBGValues) - 20) : 60;
   const yMax = allBGValues.length ? Math.min(350, Math.max(...allBGValues) + 30) : 300;
 
+  // Clinically anchored y-ticks: round, diabetes-meaningful values that line up
+  // with the 70/180 target band (so the gridlines mark "in-range" boundaries).
+  const yTicks = useMemo(() => {
+    const canon = [40, 54, 70, 100, 140, 180, 220, 260, 300, 350];
+    const ticks = canon.filter(t => t >= yMin && t <= yMax);
+    // Always surface the target-band edges if they fall inside the view.
+    [70, 180].forEach(t => { if (t >= yMin && t <= yMax && !ticks.includes(t)) ticks.push(t); });
+    return ticks.sort((a, b) => a - b);
+  }, [yMin, yMax]);
+
   return (
     <div className="page">
       {/* Header */}
@@ -517,6 +527,7 @@ export default function Dashboard() {
                 />
                 <YAxis
                   domain={[yMin, yMax]}
+                  ticks={yTicks}
                   tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
                   width={34}
                 />
@@ -537,27 +548,8 @@ export default function Dashboard() {
                   connectNulls
                 />
 
-                {/* Meal vertical lines — all blue */}
-                {mealEvents.map((m, i) => (
-                  <ReferenceLine
-                    key={`meal-${i}`}
-                    x={new Date(m.timestamp).getTime()}
-                    stroke={MEAL_COLOR}
-                    strokeWidth={2}
-                    strokeDasharray="5 3"
-                  />
-                ))}
-
-                {/* Insulin vertical lines */}
-                {insulinEvents.map((l, i) => (
-                  <ReferenceLine
-                    key={`ins-${i}`}
-                    x={new Date(l.timestamp).getTime()}
-                    stroke={insulinColor(l.brandType)}
-                    strokeWidth={2}
-                    strokeDasharray="2 4"
-                  />
-                ))}
+                {/* Event timing is shown by the aligned marker strip above the
+                    chart — no full-height vertical lines (they cluttered the curve). */}
               </ComposedChart>
             </ResponsiveContainer>
           </>
