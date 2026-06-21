@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import { useAuth } from '../store/AuthContext';
+import { supabase } from '../lib/supabase';
 import { Settings as SettingsIcon, Link, Trash2, CheckCircle, FileText, MessageSquare, HelpCircle, GraduationCap, KeyRound, Lock } from 'lucide-react';
 import { INSULIN_BRANDS } from '../utils/insulinCalculator';
 import { openReport } from '../utils/reportGenerator';
@@ -12,6 +13,127 @@ function zhPwError(msg = '') {
   if (/session|expired|not.*authenticated/i.test(msg)) return '登入已過期，請重新登入後再修改';
   if (/rate limit|too many/i.test(msg)) return '嘗試太頻繁，請稍後再試';
   return msg || '發生錯誤，請重試';
+}
+
+// LINE Bot binding card
+function LineBindCard() {
+  const { user } = useAuth();
+  const [code, setCode] = useState('');
+  const [bound, setBound] = useState(null); // null=loading, true/false
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  const getToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token;
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    getToken().then(token => {
+      if (!token) return;
+      fetch('/api/line/status', { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setBound(d.bound))
+        .catch(() => setBound(false));
+    });
+  }, [user]);
+
+  const handleBind = async (e) => {
+    e.preventDefault();
+    setErr(''); setMsg('');
+    if (!code.trim()) return;
+    setBusy(true);
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/line/bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setBound(true);
+      setMsg('✅ 綁定成功！現在可以用 LINE 記錄血糖、注射和飲食。');
+      setCode('');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUnbind = async () => {
+    if (!confirm('確定要解除 LINE 綁定嗎？')) return;
+    setBusy(true);
+    try {
+      const token = await getToken();
+      await fetch('/api/line/unbind', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setBound(false);
+      setMsg('已解除 LINE 綁定。');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!user) return null;
+
+  return (
+    <div className="card">
+      <h3><MessageSquare size={16} style={{ color: '#06c755' }} /> LINE Bot 綁定</h3>
+
+      {bound ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0', color: '#06c755' }}>
+            <CheckCircle size={16} />
+            <span style={{ fontWeight: 600 }}>已綁定 LINE 帳號</span>
+          </div>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            在 LINE 傳訊給 DiaGuide Bot 即可記錄資料：<br />
+            💉 「速效 8U」「長效 20U」<br />
+            🩸 「血糖 120」<br />
+            🍽 「早餐 白飯一碗 雞蛋」<br />
+            ❓ 傳「說明」查看所有指令
+          </p>
+          {msg && <div className="auth-notice">{msg}</div>}
+          <button className="btn-danger" onClick={handleUnbind} disabled={busy}>
+            解除 LINE 綁定
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            綁定後可直接在 LINE 傳訊記錄胰島素注射、血糖與飲食，不需開啟 App。
+          </p>
+          <ol className="hint" style={{ paddingLeft: 18, marginBottom: 12, lineHeight: 2 }}>
+            <li>加 DiaGuide Bot 為 LINE 好友</li>
+            <li>在 LINE 傳送「<b>綁定</b>」取得 6 位數驗證碼</li>
+            <li>在下方輸入驗證碼完成綁定</li>
+          </ol>
+          {msg && <div className="auth-notice">{msg}</div>}
+          {err && <div className="auth-error">{err}</div>}
+          <form onSubmit={handleBind} style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={code}
+              onChange={e => setCode(e.target.value)}
+              placeholder="輸入 6 位數驗證碼"
+              maxLength={6}
+              style={{ flex: 1, fontSize: 18, letterSpacing: 4, textAlign: 'center' }}
+            />
+            <button className="btn-primary" type="submit" disabled={busy || !code.trim()}>
+              {busy ? '驗證中…' : '綁定'}
+            </button>
+          </form>
+        </>
+      )}
+    </div>
+  );
 }
 
 // In-app change-password card (uses the current session; no email round-trip)
@@ -302,6 +424,7 @@ export default function Settings() {
         </div>
       </div>
 
+      <LineBindCard />
       <ChangePassword />
 
       <div className="card">
