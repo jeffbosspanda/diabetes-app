@@ -94,10 +94,13 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 ---
 
 ## 5. Rich Menu（聊天室底部常駐選單）
-- 圖片：`server/assets/line-richmenu.png`（2500×843，由瀏覽器 Canvas 產生，內建中文字型 + emoji）
+- 圖片：`server/assets/line-richmenu.png`（2500×843，由瀏覽器 Canvas 產生）
+- **專業改版**：白色卡片 + 頂部彩色 accent 條 + 淡色圓角 icon 徽章 + 標題/副標，淺灰漸層底
 - 目前 3 欄：**注射 / 飲食 / 說明**（原本 4 欄含血糖，已移除血糖）
 - 各區塊送出 postback：`action=menu_insulin` / `action=menu_meal` / `action=menu_help`
-- 定義於 `RICH_MENU_DEF`，由 `/api/line/setup-richmenu` 上傳註冊
+- 定義於 `RICH_MENU_DEF`；註冊邏輯抽成 `applyRichMenu()`
+- **開機自動註冊**：`app.listen` 啟動時呼叫 `applyRichMenu()`，部署即更新選單（免手動打 setup URL）。可設 `AUTO_RICHMENU=off` 關閉
+- ⚠️ Rich Menu 存在 LINE 伺服器，**單純部署程式碼不會更新**；需重新註冊（現由開機 hook 自動處理）。手動端點 `/api/line/setup-richmenu?key=<CRON_SECRET>` 仍保留
 
 ---
 

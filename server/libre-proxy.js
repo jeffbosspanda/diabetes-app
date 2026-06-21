@@ -1242,6 +1242,47 @@ app.get('/api/line/status', async (req, res) => {
 // Registers the bottom persistent menu on the LINE account. Run once (and again
 // whenever the menu layout/image changes). Guarded by CRON_SECRET so randoms
 // can't reset the menu. Trigger: GET/POST /api/line/setup-richmenu?key=<secret>
+// Core registration: delete existing menus, create from RICH_MENU_DEF, upload
+// the image, set as default. Used by the endpoint AND the boot hook so a deploy
+// that changes the layout/image takes effect without a manual trigger.
+async function applyRichMenu() {
+  if (!LINE_CHANNEL_ACCESS_TOKEN) throw new Error('LINE_CHANNEL_ACCESS_TOKEN 未設定');
+  const auth = { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` };
+
+  // 1) Remove any existing rich menus (avoid accumulation / stale layouts)
+  const listRes = await fetch(`${LINE_API}/richmenu/list`, { headers: auth });
+  const list = await listRes.json();
+  for (const rm of (list.richmenus || [])) {
+    await fetch(`${LINE_API}/richmenu/${rm.richMenuId}`, { method: 'DELETE', headers: auth });
+  }
+
+  // 2) Create the rich menu object
+  const createRes = await fetch(`${LINE_API}/richmenu`, {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify(RICH_MENU_DEF),
+  });
+  const created = await createRes.json();
+  if (!createRes.ok) throw new Error(`create: ${JSON.stringify(created)}`);
+  const richMenuId = created.richMenuId;
+
+  // 3) Upload the image (data domain)
+  const img = readFileSync(path.join(__dirname, 'assets', 'line-richmenu.png'));
+  const upRes = await fetch(`${LINE_API_DATA}/richmenu/${richMenuId}/content`, {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'image/png' },
+    body: img,
+  });
+  if (!upRes.ok) throw new Error(`upload: ${upRes.status} ${await upRes.text()}`);
+
+  // 4) Set as the default menu for all users
+  const defRes = await fetch(`${LINE_API}/user/all/richmenu/${richMenuId}`, { method: 'POST', headers: auth });
+  if (!defRes.ok) throw new Error(`setDefault: ${defRes.status} ${await defRes.text()}`);
+
+  console.log('[LINE] Rich Menu 已設定', richMenuId);
+  return richMenuId;
+}
+
 app.all('/api/line/setup-richmenu', async (req, res) => {
   const configured = (process.env.CRON_SECRET || '').trim();
   const secret = (req.get('x-cron-secret') || req.query.key || '').trim();
@@ -1249,39 +1290,8 @@ app.all('/api/line/setup-richmenu', async (req, res) => {
   if (secret !== configured) return res.status(401).json({ error: 'key 不符' });
   if (!LINE_CHANNEL_ACCESS_TOKEN) return res.status(503).json({ error: 'LINE_CHANNEL_ACCESS_TOKEN 未設定' });
 
-  const auth = { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` };
   try {
-    // 1) Remove any existing rich menus (avoid accumulation on re-run)
-    const listRes = await fetch(`${LINE_API}/richmenu/list`, { headers: auth });
-    const list = await listRes.json();
-    for (const rm of (list.richmenus || [])) {
-      await fetch(`${LINE_API}/richmenu/${rm.richMenuId}`, { method: 'DELETE', headers: auth });
-    }
-
-    // 2) Create the rich menu object
-    const createRes = await fetch(`${LINE_API}/richmenu`, {
-      method: 'POST',
-      headers: { ...auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify(RICH_MENU_DEF),
-    });
-    const created = await createRes.json();
-    if (!createRes.ok) throw new Error(`create: ${JSON.stringify(created)}`);
-    const richMenuId = created.richMenuId;
-
-    // 3) Upload the image (data domain)
-    const img = readFileSync(path.join(__dirname, 'assets', 'line-richmenu.png'));
-    const upRes = await fetch(`${LINE_API_DATA}/richmenu/${richMenuId}/content`, {
-      method: 'POST',
-      headers: { ...auth, 'Content-Type': 'image/png' },
-      body: img,
-    });
-    if (!upRes.ok) throw new Error(`upload: ${upRes.status} ${await upRes.text()}`);
-
-    // 4) Set as the default menu for all users
-    const defRes = await fetch(`${LINE_API}/user/all/richmenu/${richMenuId}`, { method: 'POST', headers: auth });
-    if (!defRes.ok) throw new Error(`setDefault: ${defRes.status} ${await defRes.text()}`);
-
-    console.log('[LINE] Rich Menu 已設定', richMenuId);
+    const richMenuId = await applyRichMenu();
     res.json({ ok: true, richMenuId });
   } catch (e) {
     console.error('[LINE] richmenu setup 失敗:', e.message);
@@ -1330,5 +1340,11 @@ app.listen(PORT, () => {
   console.log(`[LibreProxy] version=${CLIENT_VERSION} product=${PRODUCT}`);
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn('[LibreProxy] ⚠️  ANTHROPIC_API_KEY 未設定，食物照片分析功能將無法使用');
+  }
+  // Re-register the Rich Menu on boot so layout/image changes ship with a
+  // deploy (no manual setup-richmenu call needed). Best-effort; set
+  // AUTO_RICHMENU=off to skip. The manual endpoint remains available.
+  if (LINE_CHANNEL_ACCESS_TOKEN && (process.env.AUTO_RICHMENU || 'on').toLowerCase() !== 'off') {
+    applyRichMenu().catch(e => console.error('[LINE] 開機自動註冊 Rich Menu 失敗:', e.message));
   }
 });
