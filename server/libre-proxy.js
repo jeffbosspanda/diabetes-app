@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -591,6 +592,23 @@ GI > 70 為高GI，需列入 highGI 陣列。碳水估算請考慮烹調方式�
 const LINE_CHANNEL_SECRET       = process.env.LINE_CHANNEL_SECRET || '';
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 const LINE_API = 'https://api.line.me/v2/bot';
+const LINE_API_DATA = 'https://api-data.line.me/v2/bot'; // image upload uses the data domain
+
+// Rich Menu definition — 4 equal columns (each 625×843) tapping into the guided
+// flows via postback. The image (server/assets/line-richmenu.png) is registered
+// by POST /api/line/setup-richmenu.
+const RICH_MENU_DEF = {
+  size: { width: 2500, height: 843 },
+  selected: true,
+  name: 'DiaGuide Menu',
+  chatBarText: '開啟記錄選單',
+  areas: [
+    { bounds: { x: 0,    y: 0, width: 625, height: 843 }, action: { type: 'postback', data: 'action=menu_glucose', displayText: '🩸 記錄血糖' } },
+    { bounds: { x: 625,  y: 0, width: 625, height: 843 }, action: { type: 'postback', data: 'action=menu_insulin', displayText: '💉 記錄注射' } },
+    { bounds: { x: 1250, y: 0, width: 625, height: 843 }, action: { type: 'postback', data: 'action=menu_meal',    displayText: '🍽 記錄飲食' } },
+    { bounds: { x: 1875, y: 0, width: 625, height: 843 }, action: { type: 'postback', data: 'action=menu_help',    displayText: '❓ 說明' } },
+  ],
+};
 
 // Binding codes: 6-digit code → { lineUserId, expiresAt }. In-memory only;
 // codes expire in 10 min so a server restart simply forces a re-bind.
@@ -626,6 +644,44 @@ async function linePush(lineUserId, text) {
     console.error('[LINE] push error:', e.message);
   }
 }
+
+// Reply with a text message that carries quick-reply buttons above the keyboard.
+// `buttons` = [{ label, data, displayText? }] → rendered as postback actions.
+async function lineReplyQuick(replyToken, text, buttons = []) {
+  const items = buttons.slice(0, 13).map(b => ({
+    type: 'action',
+    action: { type: 'postback', label: b.label, data: b.data, displayText: b.displayText || b.label },
+  }));
+  const message = { type: 'text', text };
+  if (items.length) message.quickReply = { items };
+  try {
+    await fetch(`${LINE_API}/message/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ replyToken, messages: [message] }),
+    });
+  } catch (e) {
+    console.error('[LINE] quick reply error:', e.message);
+  }
+}
+
+// Per-user guided-flow state. flow = 'insulin'|'glucose'|'meal'; step names the
+// field we're waiting for; data holds choices already made. In-memory with TTL,
+// so a restart simply drops half-finished flows (user re-taps the menu).
+const lineConvState = new Map();
+const CONV_TTL = 5 * 60 * 1000;
+function setConv(lineUserId, state) {
+  lineConvState.set(lineUserId, { ...state, expiresAt: Date.now() + CONV_TTL });
+}
+function getConv(lineUserId) {
+  const s = lineConvState.get(lineUserId);
+  if (!s) return null;
+  if (s.expiresAt < Date.now()) { lineConvState.delete(lineUserId); return null; }
+  return s;
+}
+function clearConv(lineUserId) { lineConvState.delete(lineUserId); }
+
+const CANCEL_BTN = { label: '✖ 取消', data: 'action=cancel' };
 
 // ── Message parsers ──
 // Insulin: "速效 8U" / "長效 20u" / "短效 6U"
@@ -666,23 +722,58 @@ async function findUserByLineId(lineUserId) {
   return rows?.[0] || null;
 }
 
-const LINE_HELP = `📖 DiaGuide 記錄指令
+const INSULIN_LABEL = { rapid: '速效', short: '短效', long: '長效' };
+const MEAL_LABEL = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '點心' };
+const nowTime = () => new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-💉 注射
-「速效 8U」
-「短效 6U」
-「長效 20U」
+// ── Record helpers — used by BOTH direct text commands AND the guided flow.
+// Each writes to Supabase and returns a confirmation string.
+async function recordInsulin(userRow, insulinType, units) {
+  const { user_id, data } = userRow;
+  const logs = Array.isArray(data.insulinLogs) ? data.insulinLogs : [];
+  logs.push({ insulinType, units, timestamp: new Date().toISOString(), source: 'line', id: `line-${Date.now()}` });
+  await updateUserData(user_id, d => ({ ...d, insulinLogs: logs }));
+  return `✅ 已記錄注射\n💉 ${INSULIN_LABEL[insulinType]} ${units} U\n⏰ ${nowTime()}`;
+}
 
-🩸 血糖
-「血糖 120」
+async function recordGlucose(userRow, value) {
+  const { user_id, data } = userRow;
+  const readings = Array.isArray(data.glucoseReadings) ? data.glucoseReadings : [];
+  readings.push({ value, unit: 'mg/dL', mealContext: 'other', timestamp: new Date().toISOString(), source: 'line', id: `line-${Date.now()}` });
+  await updateUserData(user_id, d => ({ ...d, glucoseReadings: readings }));
+  const flag = value < 70 ? '⚠️ 低血糖，請補充糖分！' : value > 180 ? '⚠️ 偏高，注意觀察' : '✅ 正常範圍';
+  return `✅ 已記錄血糖\n🩸 ${value} mg/dL\n${flag}`;
+}
 
-🍽 飲食
-「早餐 白飯一碗 雞蛋」
-「午餐 便當」
-「晚餐 燙青菜 豆腐」
+async function recordMeal(userRow, mealType, foods) {
+  const { user_id, data } = userRow;
+  const meals = Array.isArray(data.meals) ? data.meals : [];
+  meals.push({ mealType, foods, timestamp: new Date().toISOString(), source: 'line', carbs: 0, confidence: 'undetermined', id: `line-${Date.now()}` });
+  await updateUserData(user_id, d => ({ ...d, meals }));
+  return `✅ 已記錄${MEAL_LABEL[mealType]}\n🍽 ${foods}\n\n💡 開啟 DiaGuide 可查看完整營養分析`;
+}
 
-🔗 綁定帳號
-傳「綁定」取得驗證碼`;
+// Quick-reply buttons that open each guided flow — shown on the help / fallback
+// messages so the menu is reachable even without tapping the Rich Menu.
+const MENU_BTNS = [
+  { label: '🩸 血糖', data: 'action=menu_glucose' },
+  { label: '💉 注射', data: 'action=menu_insulin' },
+  { label: '🍽 飲食', data: 'action=menu_meal' },
+  { label: '❓ 說明', data: 'action=menu_help' },
+];
+
+const LINE_HELP = `📖 DiaGuide 使用說明
+
+點下方選單或快速按鈕即可記錄，全程用點的：
+
+🩸 血糖 — 輸入數值
+💉 注射 — 選類型 → 輸入單位
+🍽 飲食 — 選餐別 → 輸入內容
+
+也可直接打字快速記錄：
+「血糖 120」「速效 8U」「早餐 白飯一碗」
+
+🔗 重新綁定：傳「綁定」`;
 
 app.post('/linebot/webhook', async (req, res) => {
   // Always 200 immediately — LINE retries on non-200
@@ -698,77 +789,133 @@ app.post('/linebot/webhook', async (req, res) => {
 
   const events = req.body?.events || [];
   for (const event of events) {
-    if (event.type !== 'message' || event.message?.type !== 'text') continue;
-
     const lineUserId = event.source?.userId;
-    const text = (event.message.text || '').trim();
     const replyToken = event.replyToken;
-    if (!lineUserId || !text || !replyToken) continue;
+    if (!lineUserId || !replyToken) continue;
 
-    // ── 綁定指令 ──
+    // Normalize input: postback (button tap) carries `data`; text carries words.
+    let postbackData = null, text = null;
+    if (event.type === 'postback') postbackData = event.postback?.data || '';
+    else if (event.type === 'message' && event.message?.type === 'text') text = (event.message.text || '').trim();
+    else continue;
+    const action = postbackData ? new URLSearchParams(postbackData).get('action') : null;
+    const pbType = postbackData ? new URLSearchParams(postbackData).get('type') : null;
+
+    // ── 綁定（純文字，任何時候可用）──
     if (text === '綁定' || text === '綁定帳號') {
-      // Purge expired codes
-      for (const [k, v] of lineBindingCodes) {
-        if (v.expiresAt < Date.now()) lineBindingCodes.delete(k);
-      }
+      clearConv(lineUserId);
+      for (const [k, v] of lineBindingCodes) { if (v.expiresAt < Date.now()) lineBindingCodes.delete(k); }
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       lineBindingCodes.set(code, { lineUserId, expiresAt: Date.now() + BIND_CODE_TTL });
       await lineReply(replyToken,
-        `🔗 綁定碼：${code}\n\n請開啟 DiaGuide →「設定」→「LINE 綁定」輸入此碼。\n⏱ 10 分鐘內有效`
+        `🔗 綁定碼：${code}\n\n請開啟 DiaGuide →「設定」→「其他裝置整合」下方的「LINE Bot 綁定」輸入此碼。\n⏱ 10 分鐘內有效`
       );
       continue;
     }
 
+    // ── 取消目前流程 ──
+    if (action === 'cancel') {
+      clearConv(lineUserId);
+      await lineReplyQuick(replyToken, '已取消 ✖\n\n要記錄什麼？', MENU_BTNS);
+      continue;
+    }
+
     // ── 說明 ──
-    if (text === '說明' || text === 'help' || text === '?') {
-      await lineReply(replyToken, LINE_HELP);
+    if (text === '說明' || text === 'help' || text === '?' || action === 'menu_help') {
+      await lineReplyQuick(replyToken, LINE_HELP, MENU_BTNS);
       continue;
     }
 
     // ── 需要綁定才能記錄 ──
     const userRow = await findUserByLineId(lineUserId);
     if (!userRow) {
+      clearConv(lineUserId);
       await lineReply(replyToken, '請先傳「綁定」來連結你的 DiaGuide 帳號 🔗');
       continue;
     }
-    const { user_id, data } = userRow;
 
-    // 注射
-    const insulin = parseInsulinMsg(text);
-    if (insulin) {
-      const logs = Array.isArray(data.insulinLogs) ? data.insulinLogs : [];
-      logs.push({ ...insulin, id: `line-${Date.now()}` });
-      await updateUserData(user_id, d => ({ ...d, insulinLogs: logs }));
-      const label = { rapid: '速效', short: '短效', long: '長效' }[insulin.insulinType];
-      const t = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
-      await lineReply(replyToken, `✅ 已記錄注射\n💉 ${label} ${insulin.units} U\n⏰ ${t}`);
+    // ── 選單入口：開始一段引導流程 ──
+    if (action === 'menu_glucose') {
+      setConv(lineUserId, { flow: 'glucose', step: 'value' });
+      await lineReplyQuick(replyToken, '🩸 請輸入血糖數值（mg/dL）\n例如：120', [CANCEL_BTN]);
+      continue;
+    }
+    if (action === 'menu_insulin') {
+      setConv(lineUserId, { flow: 'insulin', step: 'type' });
+      await lineReplyQuick(replyToken, '💉 請選擇胰島素類型', [
+        { label: '⚡ 速效', data: 'action=ins_type&type=rapid' },
+        { label: '💧 短效', data: 'action=ins_type&type=short' },
+        { label: '🌙 長效', data: 'action=ins_type&type=long' },
+        CANCEL_BTN,
+      ]);
+      continue;
+    }
+    if (action === 'menu_meal') {
+      setConv(lineUserId, { flow: 'meal', step: 'type' });
+      await lineReplyQuick(replyToken, '🍽 請選擇餐別', [
+        { label: '🌅 早餐', data: 'action=meal_type&type=breakfast' },
+        { label: '☀️ 午餐', data: 'action=meal_type&type=lunch' },
+        { label: '🌆 晚餐', data: 'action=meal_type&type=dinner' },
+        { label: '🍪 點心', data: 'action=meal_type&type=snack' },
+        CANCEL_BTN,
+      ]);
       continue;
     }
 
-    // 血糖
-    const glucose = parseGlucoseMsg(text);
-    if (glucose) {
-      const readings = Array.isArray(data.glucoseReadings) ? data.glucoseReadings : [];
-      readings.push({ ...glucose, id: `line-${Date.now()}` });
-      await updateUserData(user_id, d => ({ ...d, glucoseReadings: readings }));
-      const flag = glucose.value < 70 ? '⚠️ 低血糖，請補充糖分！' : glucose.value > 180 ? '⚠️ 偏高，注意觀察' : '✅ 正常範圍';
-      await lineReply(replyToken, `✅ 已記錄血糖\n🩸 ${glucose.value} mg/dL\n${flag}`);
+    // ── 流程中途選擇（按鈕）──
+    if (action === 'ins_type' && pbType) {
+      setConv(lineUserId, { flow: 'insulin', step: 'units', data: { type: pbType } });
+      await lineReplyQuick(replyToken, `💉 ${INSULIN_LABEL[pbType] || ''}\n請輸入單位數（U）\n例如：8`, [CANCEL_BTN]);
+      continue;
+    }
+    if (action === 'meal_type' && pbType) {
+      setConv(lineUserId, { flow: 'meal', step: 'foods', data: { type: pbType } });
+      await lineReplyQuick(replyToken, `${MEAL_LABEL[pbType] || ''}\n請輸入吃了什麼\n例如：白飯一碗 雞蛋兩顆`, [CANCEL_BTN]);
       continue;
     }
 
-    // 飲食
-    const meal = parseMealMsg(text);
-    if (meal) {
-      const meals = Array.isArray(data.meals) ? data.meals : [];
-      meals.push({ ...meal, id: `line-${Date.now()}` });
-      await updateUserData(user_id, d => ({ ...d, meals }));
-      const mLabel = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '點心' }[meal.mealType];
-      await lineReply(replyToken, `✅ 已記錄${mLabel}\n🍽 ${meal.foods}\n\n💡 開啟 DiaGuide 可查看完整營養分析`);
+    // ── 文字輸入 ──
+    if (text != null) {
+      const conv = getConv(lineUserId);
+
+      // 流程中：填入正在等待的欄位
+      if (conv) {
+        if (conv.flow === 'glucose' && conv.step === 'value') {
+          const v = parseFloat(text.replace(/[^\d.]/g, ''));
+          if (isNaN(v) || v <= 0) { await lineReplyQuick(replyToken, '請輸入數字，例如 120', [CANCEL_BTN]); continue; }
+          clearConv(lineUserId);
+          await lineReply(replyToken, await recordGlucose(userRow, v));
+          continue;
+        }
+        if (conv.flow === 'insulin' && conv.step === 'units') {
+          const v = parseFloat(text.replace(/[^\d.]/g, ''));
+          if (isNaN(v) || v <= 0) { await lineReplyQuick(replyToken, '請輸入單位數，例如 8', [CANCEL_BTN]); continue; }
+          clearConv(lineUserId);
+          await lineReply(replyToken, await recordInsulin(userRow, conv.data.type, v));
+          continue;
+        }
+        if (conv.flow === 'meal' && conv.step === 'foods') {
+          clearConv(lineUserId);
+          await lineReply(replyToken, await recordMeal(userRow, conv.data.type, text.trim()));
+          continue;
+        }
+      }
+
+      // 無進行中流程：仍支援老手直接打指令
+      const insulin = parseInsulinMsg(text);
+      if (insulin) { await lineReply(replyToken, await recordInsulin(userRow, insulin.insulinType, insulin.units)); continue; }
+      const glucose = parseGlucoseMsg(text);
+      if (glucose) { await lineReply(replyToken, await recordGlucose(userRow, glucose.value)); continue; }
+      const meal = parseMealMsg(text);
+      if (meal) { await lineReply(replyToken, await recordMeal(userRow, meal.mealType, meal.foods)); continue; }
+
+      // 看不懂 → 顯示選單按鈕
+      await lineReplyQuick(replyToken, '請點下方按鈕選擇要記錄的項目 👇', MENU_BTNS);
       continue;
     }
 
-    // 無法識別
-    await lineReply(replyToken, `❓ 看不懂這個指令。\n\n傳「說明」查看所有可用指令。`);
+    // 其他未知 postback
+    await lineReplyQuick(replyToken, '請點下方按鈕選擇要記錄的項目 👇', MENU_BTNS);
   }
 });
 
@@ -819,6 +966,57 @@ app.get('/api/line/status', async (req, res) => {
     res.json({ bound: !!row?.data?.lineUserId });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// ── Rich Menu 一次性設定 ──────────────────────────────────────────
+// Registers the bottom persistent menu on the LINE account. Run once (and again
+// whenever the menu layout/image changes). Guarded by CRON_SECRET so randoms
+// can't reset the menu. Trigger: GET/POST /api/line/setup-richmenu?key=<secret>
+app.all('/api/line/setup-richmenu', async (req, res) => {
+  const configured = (process.env.CRON_SECRET || '').trim();
+  const secret = (req.get('x-cron-secret') || req.query.key || '').trim();
+  if (!configured) return res.status(503).json({ error: 'CRON_SECRET 未設定（Render 環境變數）' });
+  if (secret !== configured) return res.status(401).json({ error: 'key 不符' });
+  if (!LINE_CHANNEL_ACCESS_TOKEN) return res.status(503).json({ error: 'LINE_CHANNEL_ACCESS_TOKEN 未設定' });
+
+  const auth = { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` };
+  try {
+    // 1) Remove any existing rich menus (avoid accumulation on re-run)
+    const listRes = await fetch(`${LINE_API}/richmenu/list`, { headers: auth });
+    const list = await listRes.json();
+    for (const rm of (list.richmenus || [])) {
+      await fetch(`${LINE_API}/richmenu/${rm.richMenuId}`, { method: 'DELETE', headers: auth });
+    }
+
+    // 2) Create the rich menu object
+    const createRes = await fetch(`${LINE_API}/richmenu`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify(RICH_MENU_DEF),
+    });
+    const created = await createRes.json();
+    if (!createRes.ok) throw new Error(`create: ${JSON.stringify(created)}`);
+    const richMenuId = created.richMenuId;
+
+    // 3) Upload the image (data domain)
+    const img = readFileSync(path.join(__dirname, 'assets', 'line-richmenu.png'));
+    const upRes = await fetch(`${LINE_API_DATA}/richmenu/${richMenuId}/content`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'image/png' },
+      body: img,
+    });
+    if (!upRes.ok) throw new Error(`upload: ${upRes.status} ${await upRes.text()}`);
+
+    // 4) Set as the default menu for all users
+    const defRes = await fetch(`${LINE_API}/user/all/richmenu/${richMenuId}`, { method: 'POST', headers: auth });
+    if (!defRes.ok) throw new Error(`setDefault: ${defRes.status} ${await defRes.text()}`);
+
+    console.log('[LINE] Rich Menu 已設定', richMenuId);
+    res.json({ ok: true, richMenuId });
+  } catch (e) {
+    console.error('[LINE] richmenu setup 失敗:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -95,11 +95,10 @@ function LineBindCard() {
             <span style={{ fontWeight: 600 }}>已綁定 LINE 帳號</span>
           </div>
           <p className="hint" style={{ marginBottom: 12 }}>
-            在 LINE 傳訊給 DiaGuide Bot 即可記錄資料：<br />
-            💉 「速效 8U」「長效 20U」<br />
-            🩸 「血糖 120」<br />
-            🍽 「早餐 白飯一碗 雞蛋」<br />
-            ❓ 傳「說明」查看所有指令
+            在 LINE 點聊天室下方的選單即可記錄，全程用點選的、免記指令：<br />
+            🩸 血糖　💉 注射　🍽 飲食<br />
+            也可直接打字快速記錄：<br />
+            「血糖 120」「速效 8U」「早餐 白飯一碗」
           </p>
           {msg && <div className="auth-notice">{msg}</div>}
           <button className="btn-danger" onClick={handleUnbind} disabled={busy}>
