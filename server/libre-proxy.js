@@ -842,9 +842,8 @@ function introBubble() {
     body: [
       feat('📈', '血糖追蹤', '自動同步 LibreLink 連續血糖，TIR 與趨勢一目了然'),
       feat('💉', '胰島素建議', '依血糖與飲食計算建議劑量，並記錄每次注射'),
-      feat('🍽', '飲食分析', '拍照辨識營養與升糖指數，輕鬆記錄三餐'),
-      feat('🔮', '血糖預測', '預測未來血糖變化，提前因應高低血糖'),
-      feat('🔔', '即時警報', '血糖過高或過低，立刻推播提醒'),
+      feat('🍽', '飲食分析', '辨識營養與升糖指數，輕鬆記錄三餐'),
+      feat('🔮', '血糖預測', '預測 30 分鐘後的血糖變化，提前因應'),
       feat('💬', 'LINE 快速記錄', '用這個官方帳號直接記錄注射與飲食，免開 App'),
       { type: 'separator', margin: 'lg' },
       { type: 'text', text: '第一步：用 Email 免費註冊', size: 'sm', weight: 'bold', color: C_BRAND, wrap: true, margin: 'lg' },

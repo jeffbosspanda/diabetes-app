@@ -70,7 +70,7 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 ## 4. 使用者操作流程
 
 ### 加入好友（follow 事件）
-- Bot 回覆歡迎文字 + **介紹卡片** `introBubble()`：DiaGuide 六大功能 + 官網 `https://diaguide-4r5o.onrender.com/`，引導用 **Email 免費註冊**
+- Bot 回覆歡迎文字 + **介紹卡片** `introBubble()`：DiaGuide 五大功能 + 官網 `https://diaguide-4r5o.onrender.com/`，引導用 **Email 免費註冊**
 - 卡片按鈕：「🌐 前往註冊 DiaGuide」(uri) / 「📋 開啟記錄選單」(`menu_open`)
 
 ### 說明（介紹卡片）
