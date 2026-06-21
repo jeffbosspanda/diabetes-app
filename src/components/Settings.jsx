@@ -379,6 +379,8 @@ export default function Settings() {
         </div>
       </div>
 
+      <LineBindCard />
+
       <div className="card">
         <h3>資料管理</h3>
         <div className="danger-zone">
@@ -424,7 +426,6 @@ export default function Settings() {
         </div>
       </div>
 
-      <LineBindCard />
       <ChangePassword />
 
       <div className="card">
