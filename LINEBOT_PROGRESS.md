@@ -161,3 +161,6 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 - `32105cb` feat: Rich Menu + 引導式按鈕介面
 - `c3c31b7` feat: 改用 Flex 卡片訊息
 - `91ff5ba` feat: 時間選擇、劑量改打字、移除血糖記錄
+- `f3dd106` feat: 注射加選用途、飲食加宵夜、Flex 卡片改版
+- `e7ff9e4` feat: Rich Menu 專業改版 + 開機自動註冊（修正血糖殘留）
+- `4c3f962` feat: 加入好友歡迎卡 + 說明改為 DiaGuide 介紹與 Email 註冊引導
