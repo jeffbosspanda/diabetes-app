@@ -683,6 +683,158 @@ function clearConv(lineUserId) { lineConvState.delete(lineUserId); }
 
 const CANCEL_BTN = { label: '✖ 取消', data: 'action=cancel' };
 
+// ── Flex (card) messages ──
+async function lineReplyFlex(replyToken, altText, contents) {
+  try {
+    await fetch(`${LINE_API}/message/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ replyToken, messages: [{ type: 'flex', altText, contents }] }),
+    });
+  } catch (e) {
+    console.error('[LINE] flex error:', e.message);
+  }
+}
+
+async function linePushFlex(lineUserId, altText, contents) {
+  try {
+    await fetch(`${LINE_API}/message/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: 'flex', altText, contents }] }),
+    });
+  } catch (e) {
+    console.error('[LINE] push flex error:', e.message);
+  }
+}
+
+// A coloured postback button row item.
+function flexBtn(label, data, color, style = 'primary') {
+  return { type: 'button', style, color, height: 'sm',
+    action: { type: 'postback', label, data, displayText: label } };
+}
+
+// Main menu card — 3 record actions.
+function menuBubble() {
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'md', contents: [
+      { type: 'text', text: '📋 DiaGuide 記錄選單', weight: 'bold', size: 'lg', align: 'center' },
+      { type: 'text', text: '點按鈕快速記錄，免記指令', size: 'sm', color: '#999999', align: 'center' },
+      { type: 'separator', margin: 'md' },
+      flexBtn('🩸 記錄血糖', 'action=menu_glucose', '#e0556b'),
+      flexBtn('💉 記錄注射', 'action=menu_insulin', '#4a90d9'),
+      flexBtn('🍽 記錄飲食', 'action=menu_meal', '#46b87f'),
+    ]},
+  };
+}
+
+// Insulin type chooser card.
+function insulinTypeBubble() {
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: '💉 選擇胰島素類型', weight: 'bold', size: 'md', align: 'center' },
+      flexBtn('⚡ 速效', 'action=ins_type&type=rapid', '#4a90d9'),
+      flexBtn('💧 短效', 'action=ins_type&type=short', '#5b9bd5'),
+      flexBtn('🌙 長效', 'action=ins_type&type=long', '#7f9cc4'),
+      flexBtn('✖ 取消', 'action=cancel', '#bbbbbb', 'secondary'),
+    ]},
+  };
+}
+
+// Insulin units quick-pick card (common doses + cancel). Type is embedded in the
+// button data so the tap records directly without extra state lookups.
+function insulinUnitsBubble(type) {
+  const units = [2, 4, 6, 8, 10, 12];
+  const rows = [];
+  for (let i = 0; i < units.length; i += 3) {
+    rows.push({ type: 'box', layout: 'horizontal', spacing: 'sm',
+      contents: units.slice(i, i + 3).map(u => flexBtn(`${u} U`, `action=ins_set&type=${type}&units=${u}`, '#4a90d9')) });
+  }
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: `💉 ${INSULIN_LABEL[type] || ''} — 選擇單位數`, weight: 'bold', size: 'md', align: 'center' },
+      ...rows,
+      { type: 'text', text: '或直接輸入數字（例如 8）', size: 'xs', color: '#999999', align: 'center', margin: 'sm' },
+      flexBtn('✖ 取消', 'action=cancel', '#bbbbbb', 'secondary'),
+    ]},
+  };
+}
+
+// Meal type chooser card.
+function mealTypeBubble() {
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: '🍽 選擇餐別', weight: 'bold', size: 'md', align: 'center' },
+      { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
+        flexBtn('🌅 早餐', 'action=meal_type&type=breakfast', '#46b87f'),
+        flexBtn('☀️ 午餐', 'action=meal_type&type=lunch', '#46b87f'),
+      ]},
+      { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
+        flexBtn('🌆 晚餐', 'action=meal_type&type=dinner', '#46b87f'),
+        flexBtn('🍪 點心', 'action=meal_type&type=snack', '#46b87f'),
+      ]},
+      flexBtn('✖ 取消', 'action=cancel', '#bbbbbb', 'secondary'),
+    ]},
+  };
+}
+
+// A "繼續記錄" footer that reopens the menu — appended to confirmation cards.
+function continueFooter() {
+  return { type: 'box', layout: 'vertical', contents: [
+    flexBtn('➕ 繼續記錄', 'action=menu_help', '#888888', 'secondary'),
+  ]};
+}
+
+function glucoseConfirmBubble(value) {
+  const st = value < 70 ? { t: '低血糖 ⚠️ 請補充糖分', c: '#e0556b' }
+    : value > 180 ? { t: '偏高 ⚠️ 注意觀察', c: '#f5a623' }
+    : { t: '正常範圍 ✅', c: '#46b87f' };
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: '✅ 已記錄血糖', weight: 'bold', size: 'sm', color: '#46b87f' },
+      { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+        { type: 'text', text: `${value}`, size: 'xxl', weight: 'bold', color: st.c, flex: 0 },
+        { type: 'text', text: 'mg/dL', size: 'sm', color: '#999999' },
+      ]},
+      { type: 'text', text: st.t, size: 'sm', color: st.c },
+      { type: 'text', text: `⏰ ${nowTime()}`, size: 'xs', color: '#aaaaaa' },
+    ]},
+    footer: continueFooter(),
+  };
+}
+
+function insulinConfirmBubble(type, units) {
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: '✅ 已記錄注射', weight: 'bold', size: 'sm', color: '#46b87f' },
+      { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+        { type: 'text', text: `${INSULIN_LABEL[type] || ''}`, size: 'md', weight: 'bold', color: '#4a90d9', flex: 0 },
+        { type: 'text', text: `${units} U`, size: 'xxl', weight: 'bold', color: '#4a90d9' },
+      ]},
+      { type: 'text', text: `⏰ ${nowTime()}`, size: 'xs', color: '#aaaaaa' },
+    ]},
+    footer: continueFooter(),
+  };
+}
+
+function mealConfirmBubble(type, foods) {
+  return {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+      { type: 'text', text: `✅ 已記錄${MEAL_LABEL[type] || ''}`, weight: 'bold', size: 'sm', color: '#46b87f' },
+      { type: 'text', text: `🍽 ${foods}`, size: 'md', wrap: true },
+      { type: 'text', text: '💡 開啟 DiaGuide 可查看完整營養分析', size: 'xs', color: '#999999', wrap: true },
+    ]},
+    footer: continueFooter(),
+  };
+}
+
 // ── Message parsers ──
 // Insulin: "速效 8U" / "長效 20u" / "短效 6U"
 function parseInsulinMsg(text) {
@@ -753,28 +905,6 @@ async function recordMeal(userRow, mealType, foods) {
   return `✅ 已記錄${MEAL_LABEL[mealType]}\n🍽 ${foods}\n\n💡 開啟 DiaGuide 可查看完整營養分析`;
 }
 
-// Quick-reply buttons that open each guided flow — shown on the help / fallback
-// messages so the menu is reachable even without tapping the Rich Menu.
-const MENU_BTNS = [
-  { label: '🩸 血糖', data: 'action=menu_glucose' },
-  { label: '💉 注射', data: 'action=menu_insulin' },
-  { label: '🍽 飲食', data: 'action=menu_meal' },
-  { label: '❓ 說明', data: 'action=menu_help' },
-];
-
-const LINE_HELP = `📖 DiaGuide 使用說明
-
-點下方選單或快速按鈕即可記錄，全程用點的：
-
-🩸 血糖 — 輸入數值
-💉 注射 — 選類型 → 輸入單位
-🍽 飲食 — 選餐別 → 輸入內容
-
-也可直接打字快速記錄：
-「血糖 120」「速效 8U」「早餐 白飯一碗」
-
-🔗 重新綁定：傳「綁定」`;
-
 app.post('/linebot/webhook', async (req, res) => {
   // Always 200 immediately — LINE retries on non-200
   res.status(200).end();
@@ -816,13 +946,13 @@ app.post('/linebot/webhook', async (req, res) => {
     // ── 取消目前流程 ──
     if (action === 'cancel') {
       clearConv(lineUserId);
-      await lineReplyQuick(replyToken, '已取消 ✖\n\n要記錄什麼？', MENU_BTNS);
+      await lineReplyFlex(replyToken, '已取消，要記錄什麼？', menuBubble());
       continue;
     }
 
-    // ── 說明 ──
-    if (text === '說明' || text === 'help' || text === '?' || action === 'menu_help') {
-      await lineReplyQuick(replyToken, LINE_HELP, MENU_BTNS);
+    // ── 說明 / 開啟選單 ──
+    if (text === '說明' || text === 'help' || text === '?' || text === '選單' || text === 'menu' || action === 'menu_help') {
+      await lineReplyFlex(replyToken, 'DiaGuide 記錄選單', menuBubble());
       continue;
     }
 
@@ -842,30 +972,30 @@ app.post('/linebot/webhook', async (req, res) => {
     }
     if (action === 'menu_insulin') {
       setConv(lineUserId, { flow: 'insulin', step: 'type' });
-      await lineReplyQuick(replyToken, '💉 請選擇胰島素類型', [
-        { label: '⚡ 速效', data: 'action=ins_type&type=rapid' },
-        { label: '💧 短效', data: 'action=ins_type&type=short' },
-        { label: '🌙 長效', data: 'action=ins_type&type=long' },
-        CANCEL_BTN,
-      ]);
+      await lineReplyFlex(replyToken, '請選擇胰島素類型', insulinTypeBubble());
       continue;
     }
     if (action === 'menu_meal') {
       setConv(lineUserId, { flow: 'meal', step: 'type' });
-      await lineReplyQuick(replyToken, '🍽 請選擇餐別', [
-        { label: '🌅 早餐', data: 'action=meal_type&type=breakfast' },
-        { label: '☀️ 午餐', data: 'action=meal_type&type=lunch' },
-        { label: '🌆 晚餐', data: 'action=meal_type&type=dinner' },
-        { label: '🍪 點心', data: 'action=meal_type&type=snack' },
-        CANCEL_BTN,
-      ]);
+      await lineReplyFlex(replyToken, '請選擇餐別', mealTypeBubble());
       continue;
     }
 
     // ── 流程中途選擇（按鈕）──
+    // 注射：選完類型 → 顯示單位快選卡片
     if (action === 'ins_type' && pbType) {
       setConv(lineUserId, { flow: 'insulin', step: 'units', data: { type: pbType } });
-      await lineReplyQuick(replyToken, `💉 ${INSULIN_LABEL[pbType] || ''}\n請輸入單位數（U）\n例如：8`, [CANCEL_BTN]);
+      await lineReplyFlex(replyToken, `${INSULIN_LABEL[pbType] || ''} 選擇單位數`, insulinUnitsBubble(pbType));
+      continue;
+    }
+    // 注射：一鍵選單位 → 直接記錄
+    if (action === 'ins_set' && pbType) {
+      const units = parseFloat(new URLSearchParams(postbackData).get('units'));
+      if (!isNaN(units) && units > 0) {
+        clearConv(lineUserId);
+        await recordInsulin(userRow, pbType, units);
+        await lineReplyFlex(replyToken, `已記錄注射 ${INSULIN_LABEL[pbType]} ${units}U`, insulinConfirmBubble(pbType, units));
+      }
       continue;
     }
     if (action === 'meal_type' && pbType) {
@@ -884,38 +1014,41 @@ app.post('/linebot/webhook', async (req, res) => {
           const v = parseFloat(text.replace(/[^\d.]/g, ''));
           if (isNaN(v) || v <= 0) { await lineReplyQuick(replyToken, '請輸入數字，例如 120', [CANCEL_BTN]); continue; }
           clearConv(lineUserId);
-          await lineReply(replyToken, await recordGlucose(userRow, v));
+          await recordGlucose(userRow, v);
+          await lineReplyFlex(replyToken, `已記錄血糖 ${v} mg/dL`, glucoseConfirmBubble(v));
           continue;
         }
         if (conv.flow === 'insulin' && conv.step === 'units') {
           const v = parseFloat(text.replace(/[^\d.]/g, ''));
           if (isNaN(v) || v <= 0) { await lineReplyQuick(replyToken, '請輸入單位數，例如 8', [CANCEL_BTN]); continue; }
           clearConv(lineUserId);
-          await lineReply(replyToken, await recordInsulin(userRow, conv.data.type, v));
+          await recordInsulin(userRow, conv.data.type, v);
+          await lineReplyFlex(replyToken, `已記錄注射 ${INSULIN_LABEL[conv.data.type]} ${v}U`, insulinConfirmBubble(conv.data.type, v));
           continue;
         }
         if (conv.flow === 'meal' && conv.step === 'foods') {
           clearConv(lineUserId);
-          await lineReply(replyToken, await recordMeal(userRow, conv.data.type, text.trim()));
+          await recordMeal(userRow, conv.data.type, text.trim());
+          await lineReplyFlex(replyToken, `已記錄${MEAL_LABEL[conv.data.type]}`, mealConfirmBubble(conv.data.type, text.trim()));
           continue;
         }
       }
 
       // 無進行中流程：仍支援老手直接打指令
       const insulin = parseInsulinMsg(text);
-      if (insulin) { await lineReply(replyToken, await recordInsulin(userRow, insulin.insulinType, insulin.units)); continue; }
+      if (insulin) { await recordInsulin(userRow, insulin.insulinType, insulin.units); await lineReplyFlex(replyToken, '已記錄注射', insulinConfirmBubble(insulin.insulinType, insulin.units)); continue; }
       const glucose = parseGlucoseMsg(text);
-      if (glucose) { await lineReply(replyToken, await recordGlucose(userRow, glucose.value)); continue; }
+      if (glucose) { await recordGlucose(userRow, glucose.value); await lineReplyFlex(replyToken, '已記錄血糖', glucoseConfirmBubble(glucose.value)); continue; }
       const meal = parseMealMsg(text);
-      if (meal) { await lineReply(replyToken, await recordMeal(userRow, meal.mealType, meal.foods)); continue; }
+      if (meal) { await recordMeal(userRow, meal.mealType, meal.foods); await lineReplyFlex(replyToken, '已記錄飲食', mealConfirmBubble(meal.mealType, meal.foods)); continue; }
 
-      // 看不懂 → 顯示選單按鈕
-      await lineReplyQuick(replyToken, '請點下方按鈕選擇要記錄的項目 👇', MENU_BTNS);
+      // 看不懂 → 顯示選單卡片
+      await lineReplyFlex(replyToken, 'DiaGuide 記錄選單', menuBubble());
       continue;
     }
 
     // 其他未知 postback
-    await lineReplyQuick(replyToken, '請點下方按鈕選擇要記錄的項目 👇', MENU_BTNS);
+    await lineReplyFlex(replyToken, 'DiaGuide 記錄選單', menuBubble());
   }
 });
 
@@ -936,10 +1069,11 @@ app.post('/api/line/bind', async (req, res) => {
     await updateUserData(user.id, d => ({ ...d, lineUserId: entry.lineUserId }));
     lineBindingCodes.delete(code);
 
-    // 通知 LINE 綁定成功
+    // 通知 LINE 綁定成功 — 推送歡迎訊息 + 記錄選單卡片
     await linePush(entry.lineUserId,
-      '🎉 綁定成功！\n\n現在可以用 LINE 直接記錄血糖、注射和飲食，不需要開 App。\n\n傳「說明」查看所有指令。'
+      '🎉 綁定成功！\n\n現在可以用 LINE 直接記錄血糖、注射和飲食，不需要開 App。\n點下方選單或卡片按鈕即可開始 👇'
     );
+    await linePushFlex(entry.lineUserId, 'DiaGuide 記錄選單', menuBubble());
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
