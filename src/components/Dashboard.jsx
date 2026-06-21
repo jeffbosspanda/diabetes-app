@@ -98,10 +98,13 @@ function withA(hex, a) {
 function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
   const span = windowEnd - windowStart;
   const pct = (ts) => Math.max(0, Math.min(100, (ts - windowStart) / span * 100));
+  // spillsLeft = injection was before this window (carries over from a prior day)
   const place = (startTs, durH) => {
-    const left = pct(startTs);
+    const rawLeft = (startTs - windowStart) / span * 100;
+    const left = Math.max(0, rawLeft);
     const right = pct(startTs + durH * 3600000);
-    return { left, width: Math.max(1.5, right - left) };
+    const spillsLeft = rawLeft < 0;
+    return { left, width: Math.max(1.5, right - left), spillsLeft };
   };
 
   const mealBlocks = meals.map((m, i) => {
@@ -119,15 +122,22 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
     const start = new Date(l.timestamp).getTime();
     const durH = insulinActionH(l.brand, l.brandType);
     const peakH = insulinPeakH(l.brandType);
-    const { left, width } = place(start, durH);
+    const { left, width, spillsLeft } = place(start, durH);
     const color = insulinColor(l.brandType);
-    const bg = peakH == null
+    // For spill-over blocks the gradient origin is shifted so the visible
+    // portion still looks "mid-action" rather than starting fresh.
+    const peakPct = peakH == null ? null : Math.min(60, peakH / durH * 100);
+    const bg = peakPct == null
       ? withA(color, 0.42)
-      : `linear-gradient(90deg, ${withA(color, 0.14)} 0%, ${withA(color, 0.88)} ${Math.min(60, peakH / durH * 100)}%, ${withA(color, 0.18)} 100%)`;
+      : spillsLeft
+        // block entered from left: already past onset, show peak→taper
+        ? `linear-gradient(90deg, ${withA(color, 0.88)} 0%, ${withA(color, 0.18)} 100%)`
+        : `linear-gradient(90deg, ${withA(color, 0.14)} 0%, ${withA(color, 0.88)} ${peakPct}%, ${withA(color, 0.18)} 100%)`;
+    const injTime = format(new Date(start), 'MM/dd HH:mm');
     return {
-      key: `i${i}`, left, width, bg, border: color,
-      label: `${l.units}U`,
-      title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(start), 'HH:mm')} · 作用約 ${durH}h`,
+      key: `i${i}`, left, width, bg, border: color, spillsLeft,
+      label: spillsLeft ? `${l.units}U ↵` : `${l.units}U`,
+      title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${injTime} · 作用約 ${durH}h${spillsLeft ? '（前一天注射）' : ''}`,
     };
   };
   const longBlocks  = insulin.filter(l => l.brandType === 'long').map(insulinBlock);
@@ -151,13 +161,13 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
           {lane.blocks.map(b => (
             <div
               key={b.key}
-              className="gantt-block"
+              className={`gantt-block${b.spillsLeft ? ' gantt-block-spill' : ''}`}
               title={b.title}
               style={{
                 left: `calc(${LABEL_W}px + (100% - ${LABEL_W + CHART_R}px) * ${b.left / 100})`,
                 width: `calc((100% - ${LABEL_W + CHART_R}px) * ${b.width / 100})`,
                 background: b.bg,
-                borderLeft: `2px solid ${b.border}`,
+                borderLeft: b.spillsLeft ? `2px dashed ${b.border}` : `2px solid ${b.border}`,
               }}
             >
               <span className="gantt-block-label">{b.label}</span>
@@ -266,6 +276,26 @@ export default function Dashboard() {
     state.insulinLogs.filter(l => inWin(new Date(l.timestamp).getTime())),
     [state.insulinLogs, selDay]
   );
+
+  // Extended insulin set for the Gantt: includes any injection from adjacent
+  // days whose action window overlaps the display window.
+  // Look-back 48 h catches the longest basal (Tresiba 42 h); look-ahead 8 h
+  // catches a short-acting bolus injected just before midnight of the prev day.
+  const ganttInsulinEvents = useMemo(() => {
+    const LOOK_BACK_MS  = 48 * 3600 * 1000;
+    const LOOK_AHEAD_MS =  8 * 3600 * 1000;
+    return state.insulinLogs.filter(l => {
+      const injectedAt = new Date(l.timestamp).getTime();
+      if (injectedAt >= winLo && injectedAt <= winHi) return true; // already in window
+      const durMs = insulinActionH(l.brand, l.brandType) * 3600 * 1000;
+      const actionEnd = injectedAt + durMs;
+      // Injected before window: active if action hasn't expired by winLo
+      if (injectedAt < winLo && injectedAt >= winLo - LOOK_BACK_MS) return actionEnd > winLo;
+      // Injected after window start (future bleed from prev-day view): skip
+      if (injectedAt > winHi && injectedAt <= winHi + LOOK_AHEAD_MS) return injectedAt < winHi;
+      return false;
+    });
+  }, [state.insulinLogs, selDay]);
 
   const hasTimeline = bgPoints.length > 0;
 
@@ -579,10 +609,11 @@ export default function Dashboard() {
               </ComposedChart>
             </ResponsiveContainer>
 
-            {/* Action Gantt — meals + insulin duration, x-aligned to the curve */}
+            {/* Action Gantt — meals + insulin duration, x-aligned to the curve.
+                ganttInsulinEvents includes adjacent-day injections still active. */}
             <ActionGantt
               meals={mealEvents}
-              insulin={insulinEvents}
+              insulin={ganttInsulinEvents}
               windowStart={xDomain[0]}
               windowEnd={xDomain[1]}
             />
