@@ -96,9 +96,10 @@ function LineBindCard() {
           </div>
           <p className="hint" style={{ marginBottom: 12 }}>
             在 LINE 點聊天室下方的選單即可記錄，全程用點選的、免記指令：<br />
-            🩸 血糖　💉 注射　🍽 飲食<br />
+            💉 注射　🍽 飲食（可選擇記錄時間，預設現在）<br />
             也可直接打字快速記錄：<br />
-            「血糖 120」「速效 8U」「早餐 白飯一碗」
+            「速效 8U」「早餐 白飯一碗」<br />
+            <span style={{ color: '#888' }}>※ 血糖由 LibreLink 自動同步，不需手動記錄</span>
           </p>
           {msg && <div className="auth-notice">{msg}</div>}
           <button className="btn-danger" onClick={handleUnbind} disabled={busy}>
