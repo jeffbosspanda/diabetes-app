@@ -1,7 +1,7 @@
 # DiaGuide LINE Bot — 開發進度
 
 > 透過 LINE 聊天記錄胰島素注射與飲食，不需開啟 DiaGuide App。
-> 最後更新：2026-06-21
+> 最後更新：2026-06-21（Flex 卡片改版 + 注射用途 / 飲食宵夜）
 
 ---
 
@@ -75,16 +75,21 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 3. DiaGuide →「設定」→「其他裝置整合」下方「LINE Bot 綁定」輸入碼
 4. 綁定成功，Bot 推送歡迎訊息 + 選單卡片
 
-### 記錄注射
-選單「💉 注射」→ 選類型（速效/短效/長效）→ 打字輸入單位（可含 .5）→ 時間卡片（確認現在 / 改時間）→ 確認卡
+### 記錄注射（4 步驟）
+選單「💉 注射」→ ①選類型（速效/短效/長效）→ ②選用途 → ③打字輸入單位（可含 .5）→ ④時間卡片（確認現在 / 改時間）→ 確認卡
+- 用途（速效/短效）：早餐 / 午餐 / 晚餐 / 宵夜 / 點心 / **校正劑量**
+- 用途（長效，非餐別）：睡前 / 早晨 / 其他
+- 用途寫入 dose 的 `mealType` 欄位（與 App 一致）；同時寫入 `brandType`/`brand`，讓 App 正確顯示類型
 
 ### 記錄飲食
-選單「🍽 飲食」→ 選餐別（早/午/晚/點心）→ 打字輸入內容 → 時間卡片 → 確認卡
+選單「🍽 飲食」→ 選餐別（早/午/晚/**宵夜**/點心）→ 打字輸入內容 → 時間卡片 → 確認卡
+- 宵夜寫入 `lateSnack`（與 App `MEAL_LABELS` 一致）
 
 ### 直接指令（免走流程）
 - `速效 8U`、`短效 6U`、`長效 20U`
-- `早餐 白飯一碗 雞蛋`、`午餐 便當`
+- `早餐 白飯一碗 雞蛋`、`午餐 便當`、`宵夜 泡麵`（宵夜→`lateSnack`）
 - 其他關鍵字：`說明`/`選單`/`綁定`/`取消`
+- 註：直接指令不帶用途/餐別細節以外的標記，注射指令不含 `mealType`
 
 ---
 
@@ -123,6 +128,10 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 - **無下拉選單**：LINE 聊天室無原生 dropdown，劑量採打字輸入。
 - **Rich Menu 圖片產生**：未用 sharp（安裝被拒），改用瀏覽器 Canvas `toDataURL` 產 PNG，再 base64 解碼寫檔，避開伺服器缺中文字型問題。
 - 找使用者：`supabaseAdmin.from('app_state').filter('data->>lineUserId','eq',lineUserId)`。
+- **Flex 卡片設計系統**：`proBubble()`（彩色 header band + padding body + footer）、`menuItem()`（可點 list row：emoji 圓徽章 + 標題/副標 + accent chevron）、`detailRow()`。色票對齊 App：品牌紫 `#863bff`、注射藍 `#4a90d9`、飲食綠 `#34b97f`。
+- **注射資料模型對齊 App**：`recordInsulin` 寫入 `brandType`（App 讀此判斷類型）、`brand`（中文標籤，避免 log-tag 空白）、`mealType`（用途/校正）；保留 `insulinType` 向後相容。先前只寫 `insulinType`，App 會一律顯示「速效」。
+- **餐別值對齊 App**：宵夜 = `lateSnack`（非 `snack`），對應 `Dashboard.jsx` 的 `MEAL_LABELS`。
+- **血糖文案**：綁定成功推播與選單卡片不再出現「記錄血糖」字樣；選單 footer 註明「血糖由 LibreLink 自動同步」。
 
 ---
 
