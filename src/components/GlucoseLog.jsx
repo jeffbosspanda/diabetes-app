@@ -4,6 +4,7 @@ import { Activity, Plus, AlertTriangle, TrendingUp } from 'lucide-react';
 import { getBGStatus, analyzeGlycemicEvents, analyzeGlucoseExcursions } from '../utils/insulinCalculator';
 import { analyzeGlucoseStats } from '../utils/glucoseStats';
 import { analyzeSecondWave } from '../utils/secondWave';
+import { computeCyclePhase, analyzeCycleGlucoseImpact, CYCLE_PHASE_META } from '../utils/cyclePhase';
 import { format, subDays } from 'date-fns';
 
 const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90 };
@@ -68,6 +69,21 @@ export default function GlucoseLog() {
     [state.meals, state.glucoseReadings, state.insulinLogs, secondWaveDays]
   );
   const [showAllSecondWave, setShowAllSecondWave] = useState(false);
+
+  // Menstrual cycle phase + personalized glucose impact (female users only).
+  const isFemale = state.profile?.gender === 'female';
+  const hasPeriodData = isFemale && !!state.profile?.lastPeriodStart;
+  const cycleLen = parseInt(state.profile?.cycleLength) || 28;
+  const cycle = useMemo(
+    () => hasPeriodData ? computeCyclePhase(state.profile.lastPeriodStart, cycleLen) : null,
+    [hasPeriodData, state.profile?.lastPeriodStart, cycleLen]
+  );
+  const cycleImpact = useMemo(
+    () => hasPeriodData
+      ? analyzeCycleGlucoseImpact(state.glucoseReadings, state.profile.lastPeriodStart, cycleLen)
+      : null,
+    [hasPeriodData, state.glucoseReadings, state.profile?.lastPeriodStart, cycleLen]
+  );
 
   return (
     <div className="page">
@@ -420,6 +436,69 @@ export default function GlucoseLog() {
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
           <TrendingUp size={16} style={{ margin: '0 auto 6px' }} />
           <div>近 {eventAnalysis.summary.days} 天無低血糖或高血糖事件，血糖控制良好 👍</div>
+        </div>
+      )}
+
+      {/* ── Menstrual cycle BG impact (female users) ── */}
+      {cycle && (
+        <div className={`card cycle-card cycle-${cycle.level}`}>
+          <div className="cycle-head">
+            <span className="cycle-flower">🌸</span>
+            <span className="cycle-phase">{cycle.label}</span>
+            <span className="cycle-day">週期第 {cycle.day} 天</span>
+            <span className={`cycle-trend cycle-trend-${cycle.bgTrend}`}>
+              {cycle.bgTrend === 'rising' ? '血糖易偏高 ↑' : cycle.bgTrend === 'falling' ? '血糖易偏低 ↓' : '血糖較平穩 →'}
+            </span>
+          </div>
+          <div className="cycle-note">{cycle.note}</div>
+
+          {/* Per-phase avg from user's own readings */}
+          {cycleImpact?.hasData && (() => {
+            const shown = cycleImpact.phases.filter(p => p.enough);
+            const maxAvg = Math.max(...shown.map(p => p.avg));
+            return (
+              <div className="cycle-impact">
+                <div className="cycle-impact-title">📊 你各階段的平均血糖</div>
+                <div className="cycle-bars">
+                  {shown.map(p => (
+                    <div key={p.key} className={`cycle-bar-row ${p.key === cycle.phase ? 'cur' : ''}`}>
+                      <span className="cycle-bar-label">{p.short}</span>
+                      <div className="cycle-bar-track">
+                        <div className="cycle-bar-fill" style={{ width: `${Math.round(p.avg / maxAvg * 100)}%`, background: p.color }} />
+                      </div>
+                      <span className="cycle-bar-val">{p.avg} <span className="cycle-bar-unit">mg/dL</span></span>
+                      {p.hypoPct >= 10 && <span className="cycle-bar-hypo">低血糖 {p.hypoPct}%</span>}
+                    </div>
+                  ))}
+                </div>
+                {cycleImpact.insights.map((ins, i) => (
+                  <div key={i} className={`cycle-insight cycle-insight-${ins.level}`}>{ins.text}</div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {cycleImpact && !cycleImpact.enoughForCompare && (
+            <div className="cycle-impact-hint">
+              持續記錄血糖後，系統將分析你各週期階段的個人血糖型態（需每個階段至少 8 筆讀數）。
+            </div>
+          )}
+
+          <div className="cycle-meta">距下次經期約 {cycle.daysToNextPeriod} 天</div>
+          <div className="basal-disclaimer" style={{ marginTop: 4 }}>
+            月經週期對血糖的影響因人而異，任何劑量調整請先諮詢醫師或衛教師。
+          </div>
+        </div>
+      )}
+
+      {/* Female user but no period data set */}
+      {isFemale && !hasPeriodData && (
+        <div className="card" style={{ borderLeft: '3px solid #ef6c8e', paddingLeft: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span>🌸</span>
+            <strong style={{ fontSize: 14 }}>月經週期血糖分析</strong>
+          </div>
+          <p className="hint">在「個人資料」設定上次月經開始日期後，系統將分析月經週期（濾泡期／黃體期／月經期）對你血糖的影響。</p>
         </div>
       )}
 
