@@ -69,8 +69,16 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 
 ## 4. 使用者操作流程
 
+### 加入好友（follow 事件）
+- Bot 回覆歡迎文字 + **介紹卡片** `introBubble()`：DiaGuide 六大功能 + 官網 `https://diaguide-4r5o.onrender.com/`，引導用 **Email 免費註冊**
+- 卡片按鈕：「🌐 前往註冊 DiaGuide」(uri) / 「📋 開啟記錄選單」(`menu_open`)
+
+### 說明（介紹卡片）
+- 文字 `說明`/`介紹`/`help`/`?` 或 Rich Menu「說明」(`menu_help`) → 顯示同一張 `introBubble()`
+- 「記錄選單」改由 `選單`/`menu`/`menu_open` 觸發；「繼續記錄」按鈕也改打 `menu_open`
+
 ### 綁定
-1. LINE 加 DiaGuide Bot 好友（Console 的 QR code）
+1. 用 Email 在官網註冊 DiaGuide 帳號
 2. 傳「綁定」→ Bot 回 6 位數碼（10 分鐘有效）
 3. DiaGuide →「設定」→「其他裝置整合」下方「LINE Bot 綁定」輸入碼
 4. 綁定成功，Bot 推送歡迎訊息 + 選單卡片
@@ -88,7 +96,7 @@ https://diaguide-4r5o.onrender.com/api/line/setup-richmenu?key=<CRON_SECRET>
 ### 直接指令（免走流程）
 - `速效 8U`、`短效 6U`、`長效 20U`
 - `早餐 白飯一碗 雞蛋`、`午餐 便當`、`宵夜 泡麵`（宵夜→`lateSnack`）
-- 其他關鍵字：`說明`/`選單`/`綁定`/`取消`
+- 其他關鍵字：`說明`/`介紹`（介紹卡）、`選單`/`menu`（記錄選單）、`綁定`、`取消`
 - 註：直接指令不帶用途/餐別細節以外的標記，注射指令不含 `mealType`
 
 ---

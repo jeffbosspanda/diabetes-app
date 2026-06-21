@@ -695,6 +695,19 @@ async function lineReplyFlex(replyToken, altText, contents) {
   }
 }
 
+// Reply with several messages at once (text + flex etc., max 5).
+async function lineReplyMsgs(replyToken, messages) {
+  try {
+    await fetch(`${LINE_API}/message/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ replyToken, messages: messages.slice(0, 5) }),
+    });
+  } catch (e) {
+    console.error('[LINE] reply msgs error:', e.message);
+  }
+}
+
 async function linePushFlex(lineUserId, altText, contents) {
   try {
     await fetch(`${LINE_API}/message/push`, {
@@ -809,6 +822,44 @@ function menuBubble() {
   });
 }
 
+const DIAGUIDE_URL = 'https://diaguide-4r5o.onrender.com/';
+
+// Intro / about card — DiaGuide feature overview + Email sign-up call to action.
+// Shown for the 「說明」 action and as the new-friend welcome.
+function introBubble() {
+  const feat = (emoji, title, desc) => ({
+    type: 'box', layout: 'horizontal', spacing: 'md', margin: 'md', contents: [
+      { type: 'text', text: emoji, size: 'lg', flex: 0 },
+      { type: 'box', layout: 'vertical', flex: 1, spacing: 'xs', contents: [
+        { type: 'text', text: title, size: 'sm', weight: 'bold', color: C_TEXT },
+        { type: 'text', text: desc, size: 'xs', color: C_MUTED, wrap: true },
+      ]},
+    ],
+  });
+  return proBubble({
+    headerTitle: 'DiaGuide 智慧血糖管理',
+    headerSub: '糖尿病的日常記錄與分析，一個 App 搞定',
+    body: [
+      feat('📈', '血糖追蹤', '自動同步 LibreLink 連續血糖，TIR 與趨勢一目了然'),
+      feat('💉', '胰島素建議', '依血糖與飲食計算建議劑量，並記錄每次注射'),
+      feat('🍽', '飲食分析', '拍照辨識營養與升糖指數，輕鬆記錄三餐'),
+      feat('🔮', '血糖預測', '預測未來血糖變化，提前因應高低血糖'),
+      feat('🔔', '即時警報', '血糖過高或過低，立刻推播提醒'),
+      feat('💬', 'LINE 快速記錄', '用這個官方帳號直接記錄注射與飲食，免開 App'),
+      { type: 'separator', margin: 'lg' },
+      { type: 'text', text: '第一步：用 Email 免費註冊', size: 'sm', weight: 'bold', color: C_BRAND, wrap: true, margin: 'lg' },
+      { type: 'text', text: DIAGUIDE_URL, size: 'xs', color: C_INSULIN, wrap: true },
+      { type: 'text', text: '註冊後在 App「設定」綁定本帳號，就能用 LINE 記錄了 👍', size: 'xs', color: C_MUTED, wrap: true, margin: 'sm' },
+    ],
+    footer: [
+      { type: 'button', style: 'primary', color: C_BRAND, height: 'sm',
+        action: { type: 'uri', label: '🌐 前往註冊 DiaGuide', uri: DIAGUIDE_URL } },
+      { type: 'button', style: 'secondary', height: 'sm', color: '#eceef1',
+        action: { type: 'postback', label: '📋 開啟記錄選單', data: 'action=menu_open', displayText: '記錄選單' } },
+    ],
+  });
+}
+
 // Insulin type chooser card.
 function insulinTypeBubble() {
   return proBubble({
@@ -907,7 +958,7 @@ function timeChooserBubble(summary, saveData, timeData, accent = C_BRAND, stepLa
 function continueFooter() {
   return [
     { type: 'button', style: 'secondary', height: 'sm', color: '#eceef1',
-      action: { type: 'postback', label: '➕ 繼續記錄', data: 'action=menu_help', displayText: '繼續記錄' } },
+      action: { type: 'postback', label: '➕ 繼續記錄', data: 'action=menu_open', displayText: '繼續記錄' } },
   ];
 }
 
@@ -1033,6 +1084,15 @@ app.post('/linebot/webhook', async (req, res) => {
     const replyToken = event.replyToken;
     if (!lineUserId || !replyToken) continue;
 
+    // ── 加入好友：先介紹 DiaGuide，再引導用 Email 註冊 ──
+    if (event.type === 'follow') {
+      await lineReplyMsgs(replyToken, [
+        { type: 'text', text: '歡迎加入 DiaGuide 👋\n我是你的血糖管理小幫手，先帶你認識一下：' },
+        { type: 'flex', altText: 'DiaGuide 功能介紹與註冊', contents: introBubble() },
+      ]);
+      continue;
+    }
+
     // Normalize input: postback (button tap) carries `data` (+ params for the
     // datetimepicker); text carries words.
     let postbackData = null, text = null, pbParams = {};
@@ -1061,8 +1121,14 @@ app.post('/linebot/webhook', async (req, res) => {
       continue;
     }
 
-    // ── 說明 / 開啟選單 ──
-    if (text === '說明' || text === 'help' || text === '?' || text === '選單' || text === 'menu' || action === 'menu_help') {
+    // ── 說明：DiaGuide 功能介紹 + Email 註冊引導 ──
+    if (text === '說明' || text === 'help' || text === '?' || text === '介紹' || action === 'menu_help') {
+      await lineReplyFlex(replyToken, 'DiaGuide 功能介紹與註冊', introBubble());
+      continue;
+    }
+
+    // ── 開啟記錄選單 ──
+    if (text === '選單' || text === 'menu' || action === 'menu_open') {
       await lineReplyFlex(replyToken, 'DiaGuide 記錄選單', menuBubble());
       continue;
     }
