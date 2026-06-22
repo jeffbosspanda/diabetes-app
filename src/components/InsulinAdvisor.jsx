@@ -186,6 +186,14 @@ export default function InsulinAdvisor() {
     setShowParamEdit(true);
   };
 
+  // Revert ICR/ISF to the system's TDD-derived auto values (clears any manual
+  // override) and reflect them in the input fields. Target BG is left as-is.
+  const useSystemAutoParams = () => {
+    const base = deriveICRandISF(tdd, state.settings.bgUnit);
+    dispatch({ type: 'UPDATE_ICR_ISF', payload: { icr: null, isf: null } });
+    setPendingParams({ icr: String(base.icr ?? ''), isf: String(base.isf ?? ''), targetBG: String(targetBG) });
+  };
+
   const handleParamConfirmed = () => {
     const newICR = parseFloat(pendingParams.icr);
     const newISF = parseFloat(pendingParams.isf);
@@ -437,6 +445,11 @@ export default function InsulinAdvisor() {
                   placeholder={String(targetBG)} />
               </div>
             </div>
+            <button className="btn-secondary full-width" style={{ marginTop: 8 }}
+              onClick={useSystemAutoParams}>
+              <Zap size={13} /> 使用系統自動運算數值
+            </button>
+            <div className="param-auto-hint">依目前 TDD（{tdd?.toFixed(1)} U）以 500／1700 法則自動推算 ICR／ISF，清除手動覆蓋。</div>
             <button className="btn-primary full-width" style={{ marginTop: 8 }}
               onClick={() => setParamConfirm(true)}
               disabled={!pendingParams.icr || !pendingParams.isf || !pendingParams.targetBG}>

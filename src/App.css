@@ -871,6 +871,7 @@ textarea { resize: vertical; }
 .param-explain-row { display: flex; flex-direction: column; gap: 2px; }
 .pe-label { font-size: 11px; font-weight: 700; color: var(--accent2); }
 .pe-desc  { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.param-auto-hint { font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-top: 4px; }
 
 /* ── Formula toggle ── */
 .btn-formula-toggle {

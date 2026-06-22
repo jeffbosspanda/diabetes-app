@@ -324,3 +324,37 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - **`LOAD_STATE` 必須是合併語意**（`{...state, ...payload}`），Settings 的「清除單項」依賴它做局部清除；改成重置會清掉其他資料（已踩過，造成飲食/注射遺失）。
 - **資料遺失教訓**：目前無完整備份機制（使用者選擇不加）。誤清後雲端 + 本機都會被空狀態覆蓋，手動紀錄不可救。
 - **此專案現在是 git repo**（main → GitHub jeffbosspanda/diabetes-app）；`git push` 觸發 Render 自動重部署 = 更新方式。
+
+---
+
+### 2026-06-22 批次（首頁圖表進階 + 劑量參數自動值按鈕）
+
+#### 首頁血糖時間軸圖表（已完成並推送）
+- 下方甘特圖改為「作用曲線」模式：每筆飲食／胰島素依藥動學畫平滑曲線
+  （開始→增強→峰值→減弱→結束）；同時段重疊者自動分列避免覆蓋。
+- 長效改為單列甘特長條（半透明區分不同注射、漸層深淺表強度，依劑量縮放）。
+- 新增「飲食綜合影響」「速短效綜合影響」累加曲線；食物峰值依升糖負荷
+  (GL=GI/100×碳水) 高低分別，胰島素峰值依注射量分別。
+- 血糖斜率列：紅＝上升、藍＝下降，零線面積填色；並由模型推算「模擬血糖
+  斜率」虛線與實際斜率比較。
+- 由模擬斜率積分出「模擬血糖曲線」疊在血糖圖與實際比較（以第一筆實際
+  血糖為錨點）。
+- 模型用 OpenAPS/Loop BGI：slope = Σcarbs×CSF×rate − Σunits×ISF×rate
+  − 基礎偏離；CSF=ISF/ICR。發現預測擺幅遠大於實際，新增 calibrateSimGain
+  以最小平方（過原點 k=Σ實際·模擬/Σ模擬²，夾 0.25–1.5）把模型校正到
+  使用者真實血糖反應，校正倍率顯示於甘特圖提示。
+
+#### 劑量參數「使用系統自動運算數值」按鈕
+- `src/components/InsulinAdvisor.jsx`：參數編輯面板新增 `useSystemAutoParams()`
+  與「⚡ 使用系統自動運算數值」按鈕，一鍵 dispatch `UPDATE_ICR_ISF {icr:null,
+  isf:null}` 清除手動覆蓋、還原 `deriveICRandISF(tdd)`（500／1700 法則）的
+  自動值並填回輸入欄。
+- `src/App.css`：新增 `.param-auto-hint`。
+- 測試：preview override icr=8/isf=30、TDD=40 → 點按鈕後輸入欄變 13/43/100、
+  摘要卡 1:13/43、state.icr/isf 清為 null；驗證通過、測試資料已清除。
+
+#### 踩坑點
+- 存檔時本機 `.claude/progress.md` 曾比 origin 少行且編碼亂碼；務必先
+  `git checkout origin/main -- .claude/progress.md` 還原 GitHub 完整版再附加，
+  純新增不刪除原內容。push 前若被 reject，先 fetch 並把變更 rebase 到最新
+  origin 的 progress.md 上重新附加，避免覆蓋他人批次。
