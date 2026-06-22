@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   ComposedChart, ReferenceLine, ReferenceArea, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Area,
+  ResponsiveContainer, CartesianGrid, Area, Line,
 } from 'recharts';
 import {
   checkDataSufficiency, getBGStatus, calculateTDD,
@@ -182,26 +182,10 @@ function insulinPeakH(brandType) {
   return brandType === 'short' ? 3 : 1.5;
 }
 
-// Activity-curve Gantt: meals + long-acting + rapid/short + per-food GI impact.
-// Each item is drawn as a smooth filled curve showing its action trend over time
-// (開始作用→增強中→峰值→減弱中→結束). Items that overlap in time within a lane are
-// split onto separate sub-rows (tracks) so curves never sit on top of each other.
-function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, windowEnd, xTicks }) {
-  const wrapRef = useRef(null);
-  const [plotW, setPlotW] = useState(300);
-  const [showDetail, setShowDetail] = useState(false); // 細項分析: reveal per-item curves
-  useEffect(() => {
-    if (!wrapRef.current) return;
-    const ro = new ResizeObserver(([e]) => setPlotW(Math.max(1, e.contentRect.width - LABEL_W - CHART_R)));
-    ro.observe(wrapRef.current);
-    return () => ro.disconnect();
-  }, []);
-
+// Build the per-event action model (foods + insulin) for a display window. Shared
+// by the Gantt (rendering) and the BG simulation so the two can never drift apart.
+function buildGanttModel(meals, insulin, windowStart, windowEnd) {
   const span = windowEnd - windowStart;
-  const xPx = (ts) => LABEL_W + Math.max(0, Math.min(1, (ts - windowStart) / span)) * plotW;
-  // Unclamped variant — for placing gradient stops across an action window that
-  // may start before / end after the visible window (cross-day long-acting).
-  const xPxRaw = (ts) => LABEL_W + ((ts - windowStart) / span) * plotW;
   // left/width (%) for track packing; spillsLeft = started before this window.
   const geom = (startTs, endTs) => {
     const rawLeft = (startTs - windowStart) / span * 100;
@@ -251,6 +235,97 @@ function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, win
     });
   });
 
+  return { foodItems, longItems, bolusItems };
+}
+
+// Area (∫activity dt, minutes) so an activity curve can be turned into a RATE that
+// integrates to the total grams/units the event carries.
+function itemActivityArea(b) {
+  let area = 0;
+  for (let m = 0; b.startTs + m * 60000 <= b.endTs; m += 3) {
+    area += activityNorm(b.startTs + m * 60000, b.startTs, b.peakTs, b.endTs, b.flat) * 3;
+  }
+  return area || 1;
+}
+
+// Simulated BG rate-of-change (mg/dL per min, or mmol/L per min — matches the unit
+// of ISF) sampled across the window via the OpenAPS/Loop "BGI" model:
+//   slope = Σ carbs×CSF×rate(t)  −  Σ units×ISF×rate(t)  −  basal-deviation(t)
+//   CSF = ISF/ICR (carb sensitivity). Stable long-acting is offset by hepatic
+//   glucose output, so only its deviation from steady state moves BG.
+function computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf, n = 80) {
+  const span = windowEnd - windowStart;
+  const ISF = isf > 0 ? isf : 50;
+  const CSF = icr > 0 ? ISF / icr : ISF / 10;
+  const fr = foodItems.map(b => ({ b, area: itemActivityArea(b) }));
+  const br = bolusItems.map(b => ({ b, area: itemActivityArea(b) }));
+  const lr = longItems.map(b => ({ b, area: itemActivityArea(b) }));
+  const rateAt = (ts, { b, area }) => activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) / area;
+
+  const basalRaw = [];
+  let basalMeanSum = 0;
+  for (let k = 0; k <= n; k++) {
+    const ts = windowStart + span * k / n;
+    let v = 0;
+    for (const r of lr) v += r.b.units * ISF * rateAt(ts, r);
+    basalRaw.push(v);
+    basalMeanSum += v;
+  }
+  const basalMean = basalRaw.length ? basalMeanSum / basalRaw.length : 0;
+
+  const samples = [];
+  let max = 0;
+  for (let k = 0; k <= n; k++) {
+    const ts = windowStart + span * k / n;
+    let slope = 0;
+    for (const r of fr) slope += r.b.carbs * CSF * rateAt(ts, r);
+    for (const r of br) slope -= r.b.units * ISF * rateAt(ts, r);
+    slope -= basalRaw[k] - basalMean; // basal deviation only
+    samples.push({ ts, slope });
+    if (Math.abs(slope) > max) max = Math.abs(slope);
+  }
+  return { samples, max, ISF, CSF };
+}
+
+// Integrate the simulated slope forward from the first real reading into a
+// predicted BG curve, anchored to that actual reading so the two start together.
+function integrateSimBG(samples, anchor) {
+  if (!samples.length || !anchor) return [];
+  const cum = [0];
+  for (let i = 1; i < samples.length; i++) {
+    const dtMin = (samples[i].ts - samples[i - 1].ts) / 60000;
+    cum[i] = cum[i - 1] + (samples[i].slope + samples[i - 1].slope) / 2 * dtMin;
+  }
+  let ia = samples.findIndex(s => s.ts >= anchor.ts);
+  if (ia < 0) ia = 0;
+  const offset = anchor.v - cum[ia];
+  const out = [];
+  for (let i = ia; i < samples.length; i++) out.push({ ts: samples[i].ts, v: Math.round((cum[i] + offset) * 10) / 10 });
+  return out;
+}
+
+// Activity-curve Gantt: meals + long-acting + rapid/short + per-food GI impact.
+// Each item is drawn as a smooth filled curve showing its action trend over time
+// (開始作用→增強中→峰值→減弱中→結束). Items that overlap in time within a lane are
+// split onto separate sub-rows (tracks) so curves never sit on top of each other.
+function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, windowEnd, xTicks }) {
+  const wrapRef = useRef(null);
+  const [plotW, setPlotW] = useState(300);
+  const [showDetail, setShowDetail] = useState(false); // 細項分析: reveal per-item curves
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([e]) => setPlotW(Math.max(1, e.contentRect.width - LABEL_W - CHART_R)));
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const span = windowEnd - windowStart;
+  const xPx = (ts) => LABEL_W + Math.max(0, Math.min(1, (ts - windowStart) / span)) * plotW;
+  // Unclamped variant — for placing gradient stops across an action window that
+  // may start before / end after the visible window (cross-day long-acting).
+  const xPxRaw = (ts) => LABEL_W + ((ts - windowStart) / span) * plotW;
+  const { foodItems, longItems, bolusItems } = buildGanttModel(meals, insulin, windowStart, windowEnd);
+
   // Sum a set of activity curves into one aggregate curve sampled across the
   // window — total combined "impact pressure" over time (for the 綜合影響 rows).
   const AGG_N = 80;
@@ -281,54 +356,10 @@ function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, win
   let slopeMax = 0.5;
   for (const s of slopeSegs) slopeMax = Math.max(slopeMax, Math.abs(s.slope));
 
-  // ── Simulated BG slope (mg/dL per min) ──────────────────────────────────────
-  // Glucodynamic model (OpenAPS/Loop "BGI"): predicted slope = carb effect (up)
-  // − insulin effect (down). For each event the activity curve is treated as an
-  // absorption/action RATE, area-normalised to the total grams/units it carries,
-  // then scaled by its sensitivity:
-  //   carbs:  +carbs × CSF   (CSF = ISF/ICR, mg/dL per g)
-  //   bolus:  −units × ISF   (mg/dL per U)
-  //   basal:  only its DEVIATION from steady state counts — stable long-acting is
-  //           offset by hepatic glucose output, so it nets ~0 slope; only onset/
-  //           taper of a dose perturb BG.
-  const ISF = isf > 0 ? isf : 50;
-  const CSF = icr > 0 ? ISF / icr : ISF / 10;
-  const itemArea = (b) => {
-    let area = 0;
-    for (let m = 0; b.startTs + m * 60000 <= b.endTs; m += 3) {
-      area += activityNorm(b.startTs + m * 60000, b.startTs, b.peakTs, b.endTs, b.flat) * 3;
-    }
-    return area || 1;
-  };
-  const foodRate  = foodItems.map(b => ({ b, area: itemArea(b) }));
-  const bolusRate = bolusItems.map(b => ({ b, area: itemArea(b) }));
-  const longRate  = longItems.map(b => ({ b, area: itemArea(b) }));
-  const rateAt = (ts, { b, area }) => activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) / area;
-
-  // basal mean over the window → subtract so steady basal contributes ~0.
-  let basalMeanSum = 0;
-  const SIM_N = 80;
-  const basalRaw = [];
-  for (let k = 0; k <= SIM_N; k++) {
-    const ts = windowStart + span * k / SIM_N;
-    let v = 0;
-    for (const r of longRate) v += r.b.units * ISF * rateAt(ts, r);
-    basalRaw.push(v);
-    basalMeanSum += v;
-  }
-  const basalMean = basalRaw.length ? basalMeanSum / basalRaw.length : 0;
-
-  const simSamples = [];
-  let simMax = 0;
-  for (let k = 0; k <= SIM_N; k++) {
-    const ts = windowStart + span * k / SIM_N;
-    let slope = 0;
-    for (const r of foodRate)  slope += r.b.carbs * CSF * rateAt(ts, r);
-    for (const r of bolusRate) slope -= r.b.units * ISF * rateAt(ts, r);
-    slope -= basalRaw[k] - basalMean; // basal deviation only
-    simSamples.push({ ts, slope });
-    if (Math.abs(slope) > simMax) simMax = Math.abs(slope);
-  }
+  // Simulated BG slope — same model/helpers the chart uses for its predicted-BG line.
+  const sim = computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf);
+  const simSamples = sim.samples;
+  const simMax = sim.max;
   // Real and simulated share one y-scale so the two slopes are directly comparable.
   const slopeScale = Math.max(slopeMax, simMax);
 
@@ -750,8 +781,17 @@ export default function Dashboard() {
     return Array.from({ length: 7 }, (_, i) => Math.round(start + step * i));
   }, [xDomain]);
 
-  // y-axis domain
-  const allBGValues = bgPoints.map(p => p.v);
+  // Predicted ("simulated") BG curve — integrate the glucodynamic BG slope forward
+  // from the first real reading so it can be overlaid on and compared with actual BG.
+  const simBG = useMemo(() => {
+    if (!bgPoints.length) return [];
+    const model = buildGanttModel(mealEvents, ganttInsulinEvents, xDomain[0], xDomain[1]);
+    const sim = computeSimSlope(model, xDomain[0], xDomain[1], icr, isf);
+    return integrateSimBG(sim.samples, bgPoints[0]);
+  }, [mealEvents, ganttInsulinEvents, xDomain, icr, isf, bgPoints]);
+
+  // y-axis domain — include the simulated curve so the prediction isn't clipped.
+  const allBGValues = [...bgPoints.map(p => p.v), ...simBG.map(p => p.v)];
   const yMin = allBGValues.length ? Math.max(40, Math.min(...allBGValues) - 20) : 60;
   const yMax = allBGValues.length ? Math.min(350, Math.max(...allBGValues) + 30) : 300;
 
@@ -951,6 +991,7 @@ export default function Dashboard() {
           <h3>{isToday ? '今日' : format(new Date(`${selDay}T00:00:00`), 'M/d')} 血糖 · 飲食 · 注射</h3>
           <div className="timeline-legend">
             <span className="legend-dot" style={{ background: BG_COLOR }} />BG
+            <span className="legend-dash" style={{ borderColor: SLOPE_SIM_COLOR }} />模擬
             <span className="legend-dot" style={{ background: MEAL_COLOR }} />餐
             <span className="legend-dot" style={{ background: RAPID_COLOR }} />速效
             <span className="legend-dot" style={{ background: SHORT_COLOR }} />短效
@@ -1013,6 +1054,15 @@ export default function Dashboard() {
                   activeDot={{ r: 5 }}
                   connectNulls
                 />
+
+                {/* Simulated (predicted) BG curve from the food/insulin model */}
+                {simBG.length > 1 && (
+                  <Line
+                    type="monotone" data={simBG} dataKey="v"
+                    stroke={SLOPE_SIM_COLOR} strokeWidth={2} strokeDasharray="5 4"
+                    dot={false} activeDot={false} isAnimationActive={false} connectNulls
+                  />
+                )}
 
                 {/* Event timing now lives in the aligned Gantt below the chart. */}
               </ComposedChart>
