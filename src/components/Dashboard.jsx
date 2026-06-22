@@ -87,6 +87,20 @@ function foodGIProfile(food) {
   return GI_VIS.low;
 }
 
+// Peak height of a food's curve = its glycaemic impact, so different foods rise
+// to different levels (not a uniform peak). Driven by glycaemic load
+// (GL ≈ GI/100 × carbs); fat/protein meals have low GL but a real delayed rise,
+// so they get a protein/fat-based floor. Returns 0.2–1.0 of the track height.
+function foodImpactMag(food, prof) {
+  const gi = food.gi ?? 50;
+  const carbs = food.carbs ?? 0;
+  let gl = (gi / 100) * carbs;
+  if (prof === GI_VIS.fatProtein) {
+    gl = Math.max(gl, (food.protein ?? 0) * 0.25 + (food.fat ?? 0) * 0.12);
+  }
+  return Math.min(1, Math.max(0.2, gl / 40));
+}
+
 
 // ── Action Gantt geometry — aligned to the BG chart's plot area ──────────────
 // LABEL_W matches the chart's YAxis width so block x-positions line up with the
@@ -96,7 +110,6 @@ const CHART_R = 12;
 const TRACK_H = 30;        // vertical band height for one curve (one sub-row)
 const LANE_GAP = 8;        // gap between lanes
 const GANTT_XAXIS_H = 16;  // bottom strip for time-tick labels
-const MEAL_ABSORB_H = 2.5; // rough carb-absorption window for the meal lane
 
 // Smooth pharmacokinetic activity profile, normalised 0..1, for any item drawn
 // in the Gantt. Returns relative action intensity at time `ts`:
@@ -183,18 +196,6 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
     return { left, width: Math.max(0.5, right - left), spillsLeft: rawLeft < 0 };
   };
 
-  const mealItems = meals.map((m, i) => {
-    const startTs = new Date(m.timestamp).getTime();
-    const endTs = startTs + MEAL_ABSORB_H * 3600000;
-    const peakTs = startTs + MEAL_ABSORB_H * 0.32 * 3600000; // carb peak ~48min
-    return {
-      key: `m${i}`, startTs, peakTs, endTs, flat: false, color: MEAL_COLOR,
-      label: `${MEAL_LABELS[m.mealType] || '餐'}`,
-      title: `${MEAL_LABELS[m.mealType] || '餐'} · ${format(new Date(startTs), 'HH:mm')}${m.carbs ? ` · ${m.carbs}g 醣` : ''}`,
-      ...geom(startTs, endTs),
-    };
-  });
-
   const insulinItem = (l, i) => {
     const startTs = new Date(l.timestamp).getTime();
     const durH = insulinActionH(l.brand, l.brandType);
@@ -204,7 +205,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
     const peakTs = flat ? null : startTs + peakH * 3600000;
     const g = geom(startTs, endTs);
     return {
-      key: `i${i}`, startTs, peakTs, endTs, flat, color: insulinColor(l.brandType),
+      key: `i${i}`, startTs, peakTs, endTs, flat, mag: 1, color: insulinColor(l.brandType),
       label: `${insulinTypeLabel(l.brandType)}${l.units}U${g.spillsLeft ? ' ↵' : ''}`,
       title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(startTs), 'MM/dd HH:mm')} · 作用約 ${durH}h${g.spillsLeft ? '（前一天注射）' : ''}`,
       ...g,
@@ -226,8 +227,9 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
       const startTs = mealTs + prof.lagMin * 60000;
       const peakTs = mealTs + prof.peakMin * 60000;
       const endTs = mealTs + prof.durMin * 60000;
+      const mag = foodImpactMag(food, prof);
       return {
-        key: `f${mi}-${fi}`, startTs, peakTs, endTs, flat: false, color: prof.color,
+        key: `f${mi}-${fi}`, startTs, peakTs, endTs, flat: false, mag, color: prof.color,
         label: (food.name || '食物').slice(0, 5),
         title: `${food.name || '食物'} · ${prof.zh} · 預估影響 ${prof.lagMin}–${prof.durMin} 分鐘`,
         ...geom(startTs, endTs),
@@ -237,7 +239,6 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
 
   const lanes = [
     { key: 'food',  label: '飲食\n影響', ...packTracks(foodItems) },
-    { key: 'meal',  label: '餐點',       ...packTracks(mealItems) },
     { key: 'long',  label: '長效',       ...packTracks(longItems) },
     { key: 'bolus', label: '速效\n短效',  ...packTracks(bolusItems) },
   ];
@@ -302,7 +303,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
                 for (let k = 0; k <= N; k++) {
                   const ts = ts0 + (ts1 - ts0) * k / N;
                   const a = activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat);
-                  pts.push({ x: xPx(ts), y: baseY - a * amp });
+                  pts.push({ x: xPx(ts), y: baseY - a * amp * b.mag });
                 }
                 const topD = pts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
                 const fillD = `${topD}L${pts[N].x.toFixed(1)},${baseY}L${pts[0].x.toFixed(1)},${baseY}Z`;
@@ -312,7 +313,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
                 let peakDot = null;
                 if (!b.flat && b.peakTs != null && b.peakTs > ts0 && b.peakTs < ts1) {
                   const pa = activityNorm(b.peakTs, b.startTs, b.peakTs, b.endTs, false);
-                  peakDot = <circle cx={xPx(b.peakTs)} cy={baseY - pa * amp} r={1.8} fill={b.color} />;
+                  peakDot = <circle cx={xPx(b.peakTs)} cy={baseY - pa * amp * b.mag} r={1.8} fill={b.color} />;
                 }
                 return (
                   <g key={b.key}>
