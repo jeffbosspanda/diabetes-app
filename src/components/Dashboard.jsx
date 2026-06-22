@@ -248,12 +248,47 @@ function itemActivityArea(b) {
   return area || 1;
 }
 
+// Fit ONE sensitivity gain so the predicted slope best matches the user's actual
+// BG slope (least squares through the origin: k = Σ real·sim / Σ sim²). The
+// population 1700/500 rules over-state real excursions, so the raw model swings
+// too hard; this learns the person's *effective* sensitivity from their own CGM
+// trace and rescales accordingly. Since carbs (×CSF) and insulin (×ISF) are both
+// proportional to ISF, a single gain corrects the whole model coherently.
+// Clamped to a sane band; returns 1 when there's too little data to fit.
+function calibrateSimGain(samples, bgPoints) {
+  if (!samples.length || bgPoints.length < 3) return 1;
+  const last = samples[samples.length - 1];
+  const simAt = (ts) => {
+    if (ts <= samples[0].ts) return samples[0].slope;
+    if (ts >= last.ts) return last.slope;
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i].ts >= ts) {
+        const a = samples[i - 1], b = samples[i];
+        return a.slope + (b.slope - a.slope) * (ts - a.ts) / (b.ts - a.ts);
+      }
+    }
+    return 0;
+  };
+  let num = 0, den = 0, cnt = 0;
+  for (let i = 0; i + 1 < bgPoints.length; i++) {
+    const dtMin = (bgPoints[i + 1].ts - bgPoints[i].ts) / 60000;
+    if (dtMin <= 0) continue;
+    const real = (bgPoints[i + 1].v - bgPoints[i].v) / dtMin;
+    const sim = simAt((bgPoints[i].ts + bgPoints[i + 1].ts) / 2);
+    num += real * sim; den += sim * sim; cnt++;
+  }
+  if (cnt < 2 || den < 1e-6) return 1;
+  return Math.max(0.25, Math.min(1.5, num / den));
+}
+
 // Simulated BG rate-of-change (mg/dL per min, or mmol/L per min — matches the unit
 // of ISF) sampled across the window via the OpenAPS/Loop "BGI" model:
 //   slope = Σ carbs×CSF×rate(t)  −  Σ units×ISF×rate(t)  −  basal-deviation(t)
 //   CSF = ISF/ICR (carb sensitivity). Stable long-acting is offset by hepatic
 //   glucose output, so only its deviation from steady state moves BG.
-function computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf, n = 80) {
+// The raw model uses the *theoretical* 1700/500 sensitivities, which over-state
+// real swings; a data-fitted gain (calibrateSimGain) rescales it to the user.
+function computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf, bgPoints = [], n = 80) {
   const span = windowEnd - windowStart;
   const ISF = isf > 0 ? isf : 50;
   const CSF = icr > 0 ? ISF / icr : ISF / 10;
@@ -274,7 +309,6 @@ function computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, wind
   const basalMean = basalRaw.length ? basalMeanSum / basalRaw.length : 0;
 
   const samples = [];
-  let max = 0;
   for (let k = 0; k <= n; k++) {
     const ts = windowStart + span * k / n;
     let slope = 0;
@@ -282,9 +316,17 @@ function computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, wind
     for (const r of br) slope -= r.b.units * ISF * rateAt(ts, r);
     slope -= basalRaw[k] - basalMean; // basal deviation only
     samples.push({ ts, slope });
-    if (Math.abs(slope) > max) max = Math.abs(slope);
   }
-  return { samples, max, ISF, CSF };
+
+  // Calibrate the theoretical model to the user's real BG response, then rescale.
+  const gain = calibrateSimGain(samples, bgPoints);
+  let max = 0;
+  for (const s of samples) {
+    s.slope *= gain;
+    const a = Math.abs(s.slope);
+    if (a > max) max = a;
+  }
+  return { samples, max, gain, ISF, CSF };
 }
 
 // Integrate the simulated slope forward from the first real reading into a
@@ -357,9 +399,10 @@ function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, win
   for (const s of slopeSegs) slopeMax = Math.max(slopeMax, Math.abs(s.slope));
 
   // Simulated BG slope — same model/helpers the chart uses for its predicted-BG line.
-  const sim = computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf);
+  const sim = computeSimSlope({ foodItems, bolusItems, longItems }, windowStart, windowEnd, icr, isf, bgPoints);
   const simSamples = sim.samples;
   const simMax = sim.max;
+  const simGain = sim.gain;
   // Real and simulated share one y-scale so the two slopes are directly comparable.
   const slopeScale = Math.max(slopeMax, simMax);
 
@@ -391,7 +434,7 @@ function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, win
   return (
     <div className="gantt" ref={wrapRef}>
       <div className="gantt-toolbar">
-        <span className="gantt-hint">綜合影響曲線 · 血糖斜率：紅升/藍降，實線＝實際、虛線＝模擬（由飲食/胰島素推算）</span>
+        <span className="gantt-hint">綜合影響曲線 · 血糖斜率：紅升/藍降，實線＝實際、虛線＝模擬（敏感度校正 ×{simGain.toFixed(2)}）</span>
         <button
           type="button"
           className={`gantt-detail-btn${showDetail ? ' on' : ''}`}
@@ -786,7 +829,7 @@ export default function Dashboard() {
   const simBG = useMemo(() => {
     if (!bgPoints.length) return [];
     const model = buildGanttModel(mealEvents, ganttInsulinEvents, xDomain[0], xDomain[1]);
-    const sim = computeSimSlope(model, xDomain[0], xDomain[1], icr, isf);
+    const sim = computeSimSlope(model, xDomain[0], xDomain[1], icr, isf, bgPoints);
     return integrateSimBG(sim.samples, bgPoints[0]);
   }, [mealEvents, ganttInsulinEvents, xDomain, icr, isf, bgPoints]);
 
