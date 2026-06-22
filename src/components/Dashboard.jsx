@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../store/AppContext';
 import {
@@ -93,9 +93,32 @@ function foodGIProfile(food) {
 // glucose curve above; CHART_R matches the chart's right margin.
 const LABEL_W = 36;
 const CHART_R = 12;
-const GANTT_SUB_H = 20;     // height of one sub-row (track) within a lane
-const GANTT_BLOCK_H = 15;   // visible block height (must be < GANTT_SUB_H)
+const TRACK_H = 30;        // vertical band height for one curve (one sub-row)
+const LANE_GAP = 8;        // gap between lanes
+const GANTT_XAXIS_H = 16;  // bottom strip for time-tick labels
 const MEAL_ABSORB_H = 2.5; // rough carb-absorption window for the meal lane
+
+// Smooth pharmacokinetic activity profile, normalised 0..1, for any item drawn
+// in the Gantt. Returns relative action intensity at time `ts`:
+//   start → 0 (作用開始), rise to peak → 1 (增強→峰值), fall back to 0 (減弱→結束).
+// Long-acting basal has no sharp peak → a flat plateau (quick onset, long hold,
+// slow taper) so users see it as steady background action rather than a spike.
+function activityNorm(ts, startTs, peakTs, endTs, flat) {
+  if (ts <= startTs || ts >= endTs) return 0;
+  if (flat || peakTs == null) {
+    const f = (ts - startTs) / (endTs - startTs);
+    const PLATEAU = 0.62;
+    if (f < 0.10) return (f / 0.10) * PLATEAU;          // quick onset
+    if (f > 0.82) return (1 - (f - 0.82) / 0.18) * PLATEAU; // slow taper
+    return PLATEAU;                                      // steady hold
+  }
+  if (ts <= peakTs) {
+    const r = (ts - startTs) / (peakTs - startTs);
+    return (1 - Math.cos(Math.PI * r)) / 2;              // smooth 0→1 (增強中)
+  }
+  const r = (ts - peakTs) / (endTs - peakTs);
+  return (1 + Math.cos(Math.PI * r)) / 2;                // smooth 1→0 (減弱中)
+}
 
 // Interval-packing: when blocks overlap in time they must not be drawn on top of
 // each other. Greedily assign each block to the first sub-row (track) whose last
@@ -136,66 +159,61 @@ function insulinPeakH(brandType) {
   return brandType === 'short' ? 3 : 1.5;
 }
 
-function withA(hex, a) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
+// Activity-curve Gantt: meals + long-acting + rapid/short + per-food GI impact.
+// Each item is drawn as a smooth filled curve showing its action trend over time
+// (開始作用→增強中→峰值→減弱中→結束). Items that overlap in time within a lane are
+// split onto separate sub-rows (tracks) so curves never sit on top of each other.
+function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
+  const wrapRef = useRef(null);
+  const [plotW, setPlotW] = useState(300);
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([e]) => setPlotW(Math.max(1, e.contentRect.width - LABEL_W - CHART_R)));
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
 
-// 3-lane Gantt: meals + long-acting + rapid/short. Insulin is drawn as colour
-// blocks whose length = duration of action and whose gradient marks the
-// onset→peak→taper; the left edge of every block is the exact event time.
-function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
   const span = windowEnd - windowStart;
-  const pct = (ts) => Math.max(0, Math.min(100, (ts - windowStart) / span * 100));
-  // spillsLeft = injection was before this window (carries over from a prior day)
-  const place = (startTs, durH) => {
+  const xPx = (ts) => LABEL_W + Math.max(0, Math.min(1, (ts - windowStart) / span)) * plotW;
+  // left/width (%) for track packing; spillsLeft = started before this window.
+  const geom = (startTs, endTs) => {
     const rawLeft = (startTs - windowStart) / span * 100;
     const left = Math.max(0, rawLeft);
-    const right = pct(startTs + durH * 3600000);
-    const spillsLeft = rawLeft < 0;
-    return { left, width: Math.max(1.5, right - left), spillsLeft };
+    const right = Math.max(0, Math.min(100, (endTs - windowStart) / span * 100));
+    return { left, width: Math.max(0.5, right - left), spillsLeft: rawLeft < 0 };
   };
 
-  const mealBlocks = meals.map((m, i) => {
-    const start = new Date(m.timestamp).getTime();
-    const { left, width } = place(start, MEAL_ABSORB_H);
+  const mealItems = meals.map((m, i) => {
+    const startTs = new Date(m.timestamp).getTime();
+    const endTs = startTs + MEAL_ABSORB_H * 3600000;
+    const peakTs = startTs + MEAL_ABSORB_H * 0.32 * 3600000; // carb peak ~48min
     return {
-      key: `m${i}`, left, width, border: MEAL_COLOR,
-      bg: `linear-gradient(90deg, ${withA(MEAL_COLOR, 0.78)} 0%, ${withA(MEAL_COLOR, 0.12)} 100%)`,
-      label: `${MEAL_LABELS[m.mealType] || '餐'}${m.carbs ? ` ${m.carbs}g` : ''}`,
-      title: `${MEAL_LABELS[m.mealType] || '餐'} · ${format(new Date(start), 'HH:mm')}${m.carbs ? ` · ${m.carbs}g 醣` : ''}`,
+      key: `m${i}`, startTs, peakTs, endTs, flat: false, color: MEAL_COLOR,
+      label: `${MEAL_LABELS[m.mealType] || '餐'}`,
+      title: `${MEAL_LABELS[m.mealType] || '餐'} · ${format(new Date(startTs), 'HH:mm')}${m.carbs ? ` · ${m.carbs}g 醣` : ''}`,
+      ...geom(startTs, endTs),
     };
   });
 
-  const insulinBlock = (l, i) => {
-    const start = new Date(l.timestamp).getTime();
+  const insulinItem = (l, i) => {
+    const startTs = new Date(l.timestamp).getTime();
     const durH = insulinActionH(l.brand, l.brandType);
     const peakH = insulinPeakH(l.brandType);
-    const { left, width, spillsLeft } = place(start, durH);
-    const color = insulinColor(l.brandType);
-    // For spill-over blocks the gradient origin is shifted so the visible
-    // portion still looks "mid-action" rather than starting fresh.
-    const peakPct = peakH == null ? null : Math.min(60, peakH / durH * 100);
-    const bg = peakPct == null
-      ? withA(color, 0.42)
-      : spillsLeft
-        // block entered from left: already past onset, show peak→taper
-        ? `linear-gradient(90deg, ${withA(color, 0.88)} 0%, ${withA(color, 0.18)} 100%)`
-        : `linear-gradient(90deg, ${withA(color, 0.14)} 0%, ${withA(color, 0.88)} ${peakPct}%, ${withA(color, 0.18)} 100%)`;
-    const injTime = format(new Date(start), 'MM/dd HH:mm');
+    const endTs = startTs + durH * 3600000;
+    const flat = peakH == null;
+    const peakTs = flat ? null : startTs + peakH * 3600000;
+    const g = geom(startTs, endTs);
     return {
-      key: `i${i}`, left, width, bg, border: color, spillsLeft,
-      label: spillsLeft ? `${l.units}U ↵` : `${l.units}U`,
-      title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${injTime} · 作用約 ${durH}h${spillsLeft ? '（前一天注射）' : ''}`,
+      key: `i${i}`, startTs, peakTs, endTs, flat, color: insulinColor(l.brandType),
+      label: `${insulinTypeLabel(l.brandType)}${l.units}U${g.spillsLeft ? ' ↵' : ''}`,
+      title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(startTs), 'MM/dd HH:mm')} · 作用約 ${durH}h${g.spillsLeft ? '（前一天注射）' : ''}`,
+      ...g,
     };
   };
-  const longBlocks  = insulin.filter(l => l.brandType === 'long').map(insulinBlock);
-  // Draw longer blocks first (behind) so a shorter overlapping dose stays readable.
-  const bolusBlocks = insulin.filter(l => l.brandType !== 'long').map(insulinBlock)
-    .sort((a, b) => b.width - a.width);
+  const longItems  = insulin.filter(l => l.brandType === 'long').map(insulinItem);
+  const bolusItems = insulin.filter(l => l.brandType !== 'long').map(insulinItem);
 
-  // Per-food GI impact blocks — same geometry as insulin, 4th lane.
-  const foodImpactBlocks = meals.flatMap((m, mi) => {
+  const foodItems = meals.flatMap((m, mi) => {
     const mealTs = new Date(m.timestamp).getTime();
     let foods = parseMealFoods(m.foods || '')
       .filter(f => !f.undetermined && ((f.carbs ?? 0) >= 3 || (f.fat ?? 0) >= 12 || (f.protein ?? 0) >= 15));
@@ -206,62 +224,124 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
     return foods.map((food, fi) => {
       const prof = foodGIProfile(food);
       const startTs = mealTs + prof.lagMin * 60000;
-      const { left, width } = place(startTs, prof.durMin / 60);
+      const peakTs = mealTs + prof.peakMin * 60000;
+      const endTs = mealTs + prof.durMin * 60000;
       return {
-        key: `f${mi}-${fi}`,
-        left, width,
-        bg: withA(prof.color, 0.55),
-        border: prof.color,
+        key: `f${mi}-${fi}`, startTs, peakTs, endTs, flat: false, color: prof.color,
         label: (food.name || '食物').slice(0, 5),
-        title: `${food.name || '食物'} · ${prof.zh} · 預估影響 ${prof.lagMin}–${prof.lagMin + prof.durMin} 分鐘`,
+        title: `${food.name || '食物'} · ${prof.zh} · 預估影響 ${prof.lagMin}–${prof.durMin} 分鐘`,
+        ...geom(startTs, endTs),
       };
     });
   });
 
   const lanes = [
-    { key: 'food',  label: '飲食\n影響', ...packTracks(foodImpactBlocks) },
-    { key: 'meal',  label: '餐點',       ...packTracks(mealBlocks) },
-    { key: 'long',  label: '長效',       ...packTracks(longBlocks) },
-    { key: 'bolus', label: '速效\n短效',  ...packTracks(bolusBlocks) },
+    { key: 'food',  label: '飲食\n影響', ...packTracks(foodItems) },
+    { key: 'meal',  label: '餐點',       ...packTracks(mealItems) },
+    { key: 'long',  label: '長效',       ...packTracks(longItems) },
+    { key: 'bolus', label: '速效\n短效',  ...packTracks(bolusItems) },
   ];
 
-  const blockTop = (track) => track * GANTT_SUB_H + (GANTT_SUB_H - GANTT_BLOCK_H) / 2;
+  // Vertical layout: stack lanes, each as tall as its track count needs.
+  let y = 2;
+  const laid = lanes.map(lane => {
+    const h = lane.trackCount * TRACK_H;
+    const o = { ...lane, yTop: y, h };
+    y += h + LANE_GAP;
+    return o;
+  });
+  const plotBottom = y - LANE_GAP;
+  const svgH = plotBottom + GANTT_XAXIS_H;
+  const plotR = LABEL_W + plotW;
+
+  const fmtTick = (ts) => format(new Date(ts), 'HH:mm');
 
   return (
-    <div className="gantt">
-      <div className="gantt-hint">區塊長度 = 作用持續時間 · 左緣 = 施打時間 · 同時段重疊者分列</div>
-      {lanes.map(lane => (
-        <div className="gantt-row" key={lane.key} style={{ height: lane.trackCount * GANTT_SUB_H }}>
-          <span className="gantt-label">{lane.label}</span>
-          {/* one baseline per track so each sub-row reads as its own timeline */}
-          {Array.from({ length: lane.trackCount }, (_, t) => (
-            <div
-              key={`bl${t}`}
-              className="gantt-baseline"
-              style={{ left: LABEL_W, right: CHART_R, top: t * GANTT_SUB_H + GANTT_SUB_H / 2 }}
-            />
-          ))}
-          {lane.blocks.map(b => (
-            <div
-              key={b.key}
-              className={`gantt-block${b.spillsLeft ? ' gantt-block-spill' : ''}`}
-              title={b.title}
-              style={{
-                left: `calc(${LABEL_W}px + (100% - ${LABEL_W + CHART_R}px) * ${b.left / 100})`,
-                width: `calc((100% - ${LABEL_W + CHART_R}px) * ${b.width / 100})`,
-                top: blockTop(b.track),
-                background: b.bg,
-                borderLeft: b.spillsLeft ? `2px dashed ${b.border}` : `2px solid ${b.border}`,
-              }}
-            >
-              <span className="gantt-block-label">{b.label}</span>
-            </div>
-          ))}
-          {lane.blocks.length === 0 && (
-            <span className="gantt-empty" style={{ left: LABEL_W + 6, top: GANTT_SUB_H / 2 }}>無</span>
-          )}
-        </div>
-      ))}
+    <div className="gantt" ref={wrapRef}>
+      <div className="gantt-hint">曲線 = 作用強度趨勢（開始→增強→峰值→減弱→結束）· 起點 = 開始作用 · 同時段重疊者分列</div>
+      <div className="gi-legend">
+        {Object.values(GI_VIS).map(p => (
+          <span key={p.zh} className="gi-legend-item">
+            <span className="gi-dot" style={{ background: p.color }} />{p.zh}
+          </span>
+        ))}
+      </div>
+      <svg width="100%" height={svgH} className="gantt-svg">
+        {/* time gridlines spanning all lanes */}
+        {xTicks.map((ts, i) => {
+          const x = xPx(ts);
+          if (x < LABEL_W - 0.5 || x > plotR + 0.5) return null;
+          return <line key={`g${i}`} x1={x} y1={2} x2={x} y2={plotBottom} stroke="var(--border)" strokeWidth={0.5} opacity={0.5} />;
+        })}
+
+        {laid.map(lane => {
+          const amp = TRACK_H - 11; // curve peak height; leaves room for label
+          return (
+            <g key={lane.key}>
+              {/* lane label (left gutter), vertically centred over its tracks */}
+              {lane.label.split('\n').map((ln, k, arr) => (
+                <text
+                  key={k} x={2} y={lane.yTop + lane.h / 2 + (k - (arr.length - 1) / 2) * 10 + 3}
+                  fontSize={9} fontWeight={700} fill="var(--text-secondary)"
+                >{ln}</text>
+              ))}
+
+              {/* per-track baseline + curves */}
+              {Array.from({ length: lane.trackCount }, (_, t) => {
+                const baseY = lane.yTop + t * TRACK_H + TRACK_H - 4;
+                return <line key={`b${t}`} x1={LABEL_W} y1={baseY} x2={plotR} y2={baseY} stroke="var(--border)" strokeWidth={0.7} />;
+              })}
+
+              {lane.blocks.map(b => {
+                const baseY = lane.yTop + b.track * TRACK_H + TRACK_H - 4;
+                const ts0 = Math.max(b.startTs, windowStart);
+                const ts1 = Math.min(b.endTs, windowEnd);
+                if (ts1 <= ts0) return null;
+                const N = 44;
+                const pts = [];
+                for (let k = 0; k <= N; k++) {
+                  const ts = ts0 + (ts1 - ts0) * k / N;
+                  const a = activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat);
+                  pts.push({ x: xPx(ts), y: baseY - a * amp });
+                }
+                const topD = pts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+                const fillD = `${topD}L${pts[N].x.toFixed(1)},${baseY}L${pts[0].x.toFixed(1)},${baseY}Z`;
+                const wide = pts[N].x - pts[0].x > 22;
+
+                // peak marker (skip for flat basal)
+                let peakDot = null;
+                if (!b.flat && b.peakTs != null && b.peakTs > ts0 && b.peakTs < ts1) {
+                  const pa = activityNorm(b.peakTs, b.startTs, b.peakTs, b.endTs, false);
+                  peakDot = <circle cx={xPx(b.peakTs)} cy={baseY - pa * amp} r={1.8} fill={b.color} />;
+                }
+                return (
+                  <g key={b.key}>
+                    <title>{b.title}</title>
+                    <path d={fillD} fill={b.color} opacity={0.16} />
+                    <path d={topD} fill="none" stroke={b.color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
+                    {peakDot}
+                    {wide && (
+                      <text x={pts[0].x + 3} y={lane.yTop + b.track * TRACK_H + 9}
+                        fontSize={8} fontWeight={700} fill={b.color}>{b.label}</text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {lane.blocks.length === 0 && (
+                <text x={LABEL_W + 6} y={lane.yTop + lane.h / 2 + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>無</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* x-axis time labels */}
+        {xTicks.map((ts, i) => {
+          const x = xPx(ts);
+          if (x < LABEL_W || x > plotR) return null;
+          return <text key={`x${i}`} x={x} y={svgH - 3} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{fmtTick(ts)}</text>;
+        })}
+      </svg>
     </div>
   );
 }
@@ -700,6 +780,7 @@ export default function Dashboard() {
               insulin={ganttInsulinEvents}
               windowStart={xDomain[0]}
               windowEnd={xDomain[1]}
+              xTicks={xTicks}
             />
           </>
         ) : (
