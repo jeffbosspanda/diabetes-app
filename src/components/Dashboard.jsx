@@ -31,6 +31,9 @@ const LONG_COLOR  = '#a855f7'; // 長效 long-acting → purple
 const insulinColor = (bt) => (bt === 'long' ? LONG_COLOR : bt === 'short' ? SHORT_COLOR : RAPID_COLOR);
 const insulinTypeLabel = (bt) => (bt === 'long' ? '長效' : bt === 'short' ? '短效' : '速效');
 const BG_COLOR    = '#0e9488'; // BG line → teal (high contrast on warm-white)
+const FOODAGG_COLOR = '#c2763a'; // 飲食綜合影響 aggregate → warm amber-brown
+const SLOPE_UP_COLOR   = '#ef4444'; // 血糖斜率 > 0 (rising) → red
+const SLOPE_DOWN_COLOR = '#2563eb'; // 血糖斜率 < 0 (falling) → blue
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', lateSnack: '宵夜', snack: '點心' };
 
 // Qualitative influence label — direction + coarse magnitude (no precise number,
@@ -185,6 +188,7 @@ function insulinPeakH(brandType) {
 function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xTicks }) {
   const wrapRef = useRef(null);
   const [plotW, setPlotW] = useState(300);
+  const [showDetail, setShowDetail] = useState(false); // 細項分析: reveal per-item curves
   useEffect(() => {
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(([e]) => setPlotW(Math.max(1, e.contentRect.width - LABEL_W - CHART_R)));
@@ -243,18 +247,23 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
     });
   });
 
-  // Aggregate bolus (速效+短效) activity summed into one curve — total acute
-  // insulin "pressure" over time, for the 速短效累加 row.
+  // Sum a set of activity curves into one aggregate curve sampled across the
+  // window — total combined "impact pressure" over time (for the 綜合影響 rows).
   const AGG_N = 80;
-  const aggSamples = [];
-  let aggMax = 0;
-  for (let k = 0; k <= AGG_N; k++) {
-    const ts = windowStart + span * k / AGG_N;
-    let val = 0;
-    for (const b of bolusItems) val += activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) * b.mag;
-    aggSamples.push({ ts, val });
-    if (val > aggMax) aggMax = val;
-  }
+  const aggregate = (items) => {
+    const samples = [];
+    let max = 0;
+    for (let k = 0; k <= AGG_N; k++) {
+      const ts = windowStart + span * k / AGG_N;
+      let val = 0;
+      for (const b of items) val += activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) * b.mag;
+      samples.push({ ts, val });
+      if (val > max) max = val;
+    }
+    return { samples, max };
+  };
+  const foodAgg  = aggregate(foodItems);
+  const bolusAgg = aggregate(bolusItems);
 
   // BG rate-of-change (mg/dL per min) between consecutive readings, plotted as a
   // bipolar curve (above zero = rising, below = falling) to compare against the
@@ -268,11 +277,14 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
   let slopeMax = 0.5;
   for (const s of slopeSegs) slopeMax = Math.max(slopeMax, Math.abs(s.slope));
 
+  // Default view shows only the four summary rows. 細項分析 reveals the per-item
+  // curves (individual foods / individual bolus shots) under their aggregate row.
   const lanes = [
-    { key: 'food',     label: '飲食\n影響', type: 'curves',    ...packTracks(foodItems) },
+    { key: 'foodSum',  label: '飲食\n綜合', type: 'aggregate', trackCount: 1, samples: foodAgg.samples,  max: foodAgg.max,  color: FOODAGG_COLOR, title: '所有食物升糖影響累加' },
+    ...(showDetail ? [{ key: 'food', label: '飲食\n細項', type: 'curves', ...packTracks(foodItems) }] : []),
     { key: 'long',     label: '長效',       type: 'curves',    ...packTracks(longItems) },
-    { key: 'bolus',    label: '速效\n短效',  type: 'curves',    ...packTracks(bolusItems) },
-    { key: 'bolusSum', label: '速短效\n累加', type: 'aggregate', trackCount: 1 },
+    { key: 'bolusSum', label: '速短效\n綜合', type: 'aggregate', trackCount: 1, samples: bolusAgg.samples, max: bolusAgg.max, color: RAPID_COLOR,   title: '速效＋短效胰島素作用累加' },
+    ...(showDetail ? [{ key: 'bolus', label: '速效\n短效', type: 'curves', ...packTracks(bolusItems) }] : []),
     { key: 'bgSlope',  label: '血糖\n斜率',  type: 'slope',     trackCount: 1 },
   ];
 
@@ -292,14 +304,23 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
 
   return (
     <div className="gantt" ref={wrapRef}>
-      <div className="gantt-hint">曲線 = 作用強度趨勢（開始→增強→峰值→減弱→結束）· 起點 = 開始作用 · 同時段重疊者分列 · 速短效累加＝所有速效/短效相加 · 血糖斜率：零線以上升、以下降</div>
-      <div className="gi-legend">
-        {Object.values(GI_VIS).map(p => (
-          <span key={p.zh} className="gi-legend-item">
-            <span className="gi-dot" style={{ background: p.color }} />{p.zh}
-          </span>
-        ))}
+      <div className="gantt-toolbar">
+        <span className="gantt-hint">綜合影響曲線 · 血糖斜率：紅＝上升、藍＝下降</span>
+        <button
+          type="button"
+          className={`gantt-detail-btn${showDetail ? ' on' : ''}`}
+          onClick={() => setShowDetail(v => !v)}
+        >{showDetail ? '收合細項' : '細項分析'}</button>
       </div>
+      {showDetail && (
+        <div className="gi-legend">
+          {Object.values(GI_VIS).map(p => (
+            <span key={p.zh} className="gi-legend-item">
+              <span className="gi-dot" style={{ background: p.color }} />{p.zh}
+            </span>
+          ))}
+        </div>
+      )}
       <svg width="100%" height={svgH} className="gantt-svg">
         {/* time gridlines spanning all lanes */}
         {xTicks.map((ts, i) => {
@@ -318,22 +339,22 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
             >{ln}</text>
           ));
 
-          // ── Aggregate bolus row: one summed curve ──
+          // ── Aggregate row: one summed curve (food or bolus) ──
           if (lane.type === 'aggregate') {
             const baseY = lane.yTop + TRACK_H - 4;
-            const max = aggMax > 0 ? aggMax : 1;
-            const pts = aggSamples.map(s => ({ x: xPx(s.ts), y: baseY - (s.val / max) * amp }));
+            const max = lane.max > 0 ? lane.max : 1;
+            const pts = lane.samples.map(s => ({ x: xPx(s.ts), y: baseY - (s.val / max) * amp }));
             const topD = pts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
             const fillD = `${topD}L${pts[pts.length - 1].x.toFixed(1)},${baseY}L${pts[0].x.toFixed(1)},${baseY}Z`;
             return (
               <g key={lane.key}>
                 {laneLabelEls}
                 <line x1={LABEL_W} y1={baseY} x2={plotR} y2={baseY} stroke="var(--border)" strokeWidth={0.7} />
-                {aggMax > 0 ? (
+                {lane.max > 0 ? (
                   <>
-                    <title>速效＋短效胰島素作用累加</title>
-                    <path d={fillD} fill={RAPID_COLOR} opacity={0.14} />
-                    <path d={topD} fill="none" stroke={RAPID_COLOR} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
+                    <title>{lane.title}</title>
+                    <path d={fillD} fill={lane.color} opacity={0.14} />
+                    <path d={topD} fill="none" stroke={lane.color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
                   </>
                 ) : (
                   <text x={LABEL_W + 6} y={lane.yTop + lane.h / 2 + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>無</text>
@@ -342,24 +363,40 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
             );
           }
 
-          // ── BG slope row: bipolar curve around a centred zero line ──
+          // ── BG slope row: bipolar curve, red above zero (升) / blue below (降) ──
           if (lane.type === 'slope') {
             const centerY = lane.yTop + TRACK_H / 2;
             const halfAmp = TRACK_H / 2 - 3;
-            const segPts = slopeSegs
-              .map(s => ({ x: xPx(s.ts), y: centerY - Math.max(-1, Math.min(1, s.slope / slopeMax)) * halfAmp }))
-              .filter(p => p.x >= LABEL_W - 0.5 && p.x <= plotR + 0.5);
-            const lineD = segPts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+            const yOf = (slope) => centerY - Math.max(-1, Math.min(1, slope / slopeMax)) * halfAmp;
+            const pts = slopeSegs.map(s => ({ x: xPx(s.ts), slope: s.slope, y: yOf(s.slope) }));
+            // Split the polyline into single-sign sub-segments (interpolating the
+            // exact zero crossing) so each piece can be coloured by direction.
+            const segs = []; // { d, rising }
+            for (let i = 0; i + 1 < pts.length; i++) {
+              const a = pts[i], b = pts[i + 1];
+              if (a.x > plotR + 0.5 || b.x < LABEL_W - 0.5) continue;
+              if ((a.slope >= 0) === (b.slope >= 0)) {
+                segs.push({ d: `M${a.x.toFixed(1)},${a.y.toFixed(1)}L${b.x.toFixed(1)},${b.y.toFixed(1)}`, rising: a.slope + b.slope >= 0 });
+              } else {
+                const f = Math.abs(a.slope) / (Math.abs(a.slope) + Math.abs(b.slope));
+                const xz = a.x + (b.x - a.x) * f;
+                segs.push({ d: `M${a.x.toFixed(1)},${a.y.toFixed(1)}L${xz.toFixed(1)},${centerY.toFixed(1)}`, rising: a.slope >= 0 });
+                segs.push({ d: `M${xz.toFixed(1)},${centerY.toFixed(1)}L${b.x.toFixed(1)},${b.y.toFixed(1)}`, rising: b.slope >= 0 });
+              }
+            }
             return (
               <g key={lane.key}>
                 {laneLabelEls}
                 <line x1={LABEL_W} y1={centerY} x2={plotR} y2={centerY} stroke="var(--border)" strokeWidth={0.8} strokeDasharray="3 3" />
-                <text x={LABEL_W + 2} y={lane.yTop + 8} fontSize={7} fill="var(--text-muted)" opacity={0.7}>升↑</text>
-                <text x={LABEL_W + 2} y={lane.yTop + TRACK_H - 2} fontSize={7} fill="var(--text-muted)" opacity={0.7}>降↓</text>
-                {segPts.length >= 2 ? (
+                <text x={LABEL_W + 2} y={lane.yTop + 8} fontSize={7} fill={SLOPE_UP_COLOR} opacity={0.85}>升↑</text>
+                <text x={LABEL_W + 2} y={lane.yTop + TRACK_H - 2} fontSize={7} fill={SLOPE_DOWN_COLOR} opacity={0.85}>降↓</text>
+                {segs.length ? (
                   <>
-                    <title>血糖變化率（mg/dL/分）</title>
-                    <path d={lineD} fill="none" stroke={BG_COLOR} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" />
+                    <title>血糖變化率（mg/dL/分）· 紅＝上升、藍＝下降</title>
+                    {segs.map((sg, i) => (
+                      <path key={i} d={sg.d} fill="none" stroke={sg.rising ? SLOPE_UP_COLOR : SLOPE_DOWN_COLOR}
+                        strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" />
+                    ))}
                   </>
                 ) : (
                   <text x={LABEL_W + 22} y={centerY + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>資料不足</text>
