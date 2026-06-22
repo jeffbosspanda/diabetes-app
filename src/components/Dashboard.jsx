@@ -34,6 +34,7 @@ const BG_COLOR    = '#0e9488'; // BG line → teal (high contrast on warm-white)
 const FOODAGG_COLOR = '#c2763a'; // 飲食綜合影響 aggregate → warm amber-brown
 const SLOPE_UP_COLOR   = '#ef4444'; // 血糖斜率 > 0 (rising) → red
 const SLOPE_DOWN_COLOR = '#2563eb'; // 血糖斜率 < 0 (falling) → blue
+const SLOPE_SIM_COLOR  = '#475569'; // 模擬血糖斜率 (predicted) → slate dashed
 const MEAL_LABELS = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', lateSnack: '宵夜', snack: '點心' };
 
 // Qualitative influence label — direction + coarse magnitude (no precise number,
@@ -185,7 +186,7 @@ function insulinPeakH(brandType) {
 // Each item is drawn as a smooth filled curve showing its action trend over time
 // (開始作用→增強中→峰值→減弱中→結束). Items that overlap in time within a lane are
 // split onto separate sub-rows (tracks) so curves never sit on top of each other.
-function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xTicks }) {
+function ActionGantt({ meals, insulin, bgPoints = [], icr, isf, windowStart, windowEnd, xTicks }) {
   const wrapRef = useRef(null);
   const [plotW, setPlotW] = useState(300);
   const [showDetail, setShowDetail] = useState(false); // 細項分析: reveal per-item curves
@@ -218,7 +219,7 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
     const peakTs = flat ? null : startTs + peakH * 3600000;
     const g = geom(startTs, endTs);
     return {
-      key: `i${i}`, startTs, peakTs, endTs, flat, mag: insulinDoseMag(l.units), color: insulinColor(l.brandType),
+      key: `i${i}`, startTs, peakTs, endTs, flat, units: l.units ?? 0, mag: insulinDoseMag(l.units), color: insulinColor(l.brandType),
       label: `${insulinTypeLabel(l.brandType)}${l.units}U${g.spillsLeft ? ' ↵' : ''}`,
       title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(startTs), 'MM/dd HH:mm')} · 作用約 ${durH}h${g.spillsLeft ? '（前一天注射）' : ''}`,
       ...g,
@@ -242,7 +243,7 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
       const endTs = mealTs + prof.durMin * 60000;
       const mag = foodImpactMag(food, prof);
       return {
-        key: `f${mi}-${fi}`, startTs, peakTs, endTs, flat: false, mag, color: prof.color,
+        key: `f${mi}-${fi}`, startTs, peakTs, endTs, flat: false, carbs: food.carbs ?? 0, mag, color: prof.color,
         label: (food.name || '食物').slice(0, 5),
         title: `${food.name || '食物'} · ${prof.zh} · 預估影響 ${prof.lagMin}–${prof.durMin} 分鐘`,
         ...geom(startTs, endTs),
@@ -280,6 +281,57 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
   let slopeMax = 0.5;
   for (const s of slopeSegs) slopeMax = Math.max(slopeMax, Math.abs(s.slope));
 
+  // ── Simulated BG slope (mg/dL per min) ──────────────────────────────────────
+  // Glucodynamic model (OpenAPS/Loop "BGI"): predicted slope = carb effect (up)
+  // − insulin effect (down). For each event the activity curve is treated as an
+  // absorption/action RATE, area-normalised to the total grams/units it carries,
+  // then scaled by its sensitivity:
+  //   carbs:  +carbs × CSF   (CSF = ISF/ICR, mg/dL per g)
+  //   bolus:  −units × ISF   (mg/dL per U)
+  //   basal:  only its DEVIATION from steady state counts — stable long-acting is
+  //           offset by hepatic glucose output, so it nets ~0 slope; only onset/
+  //           taper of a dose perturb BG.
+  const ISF = isf > 0 ? isf : 50;
+  const CSF = icr > 0 ? ISF / icr : ISF / 10;
+  const itemArea = (b) => {
+    let area = 0;
+    for (let m = 0; b.startTs + m * 60000 <= b.endTs; m += 3) {
+      area += activityNorm(b.startTs + m * 60000, b.startTs, b.peakTs, b.endTs, b.flat) * 3;
+    }
+    return area || 1;
+  };
+  const foodRate  = foodItems.map(b => ({ b, area: itemArea(b) }));
+  const bolusRate = bolusItems.map(b => ({ b, area: itemArea(b) }));
+  const longRate  = longItems.map(b => ({ b, area: itemArea(b) }));
+  const rateAt = (ts, { b, area }) => activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) / area;
+
+  // basal mean over the window → subtract so steady basal contributes ~0.
+  let basalMeanSum = 0;
+  const SIM_N = 80;
+  const basalRaw = [];
+  for (let k = 0; k <= SIM_N; k++) {
+    const ts = windowStart + span * k / SIM_N;
+    let v = 0;
+    for (const r of longRate) v += r.b.units * ISF * rateAt(ts, r);
+    basalRaw.push(v);
+    basalMeanSum += v;
+  }
+  const basalMean = basalRaw.length ? basalMeanSum / basalRaw.length : 0;
+
+  const simSamples = [];
+  let simMax = 0;
+  for (let k = 0; k <= SIM_N; k++) {
+    const ts = windowStart + span * k / SIM_N;
+    let slope = 0;
+    for (const r of foodRate)  slope += r.b.carbs * CSF * rateAt(ts, r);
+    for (const r of bolusRate) slope -= r.b.units * ISF * rateAt(ts, r);
+    slope -= basalRaw[k] - basalMean; // basal deviation only
+    simSamples.push({ ts, slope });
+    if (Math.abs(slope) > simMax) simMax = Math.abs(slope);
+  }
+  // Real and simulated share one y-scale so the two slopes are directly comparable.
+  const slopeScale = Math.max(slopeMax, simMax);
+
   // Default view shows only the four summary rows. 細項分析 reveals the per-item
   // curves (individual foods / individual bolus shots) under their aggregate row.
   const lanes = [
@@ -308,7 +360,7 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
   return (
     <div className="gantt" ref={wrapRef}>
       <div className="gantt-toolbar">
-        <span className="gantt-hint">綜合影響曲線 · 血糖斜率：紅＝上升、藍＝下降</span>
+        <span className="gantt-hint">綜合影響曲線 · 血糖斜率：紅升/藍降，實線＝實際、虛線＝模擬（由飲食/胰島素推算）</span>
         <button
           type="button"
           className={`gantt-detail-btn${showDetail ? ' on' : ''}`}
@@ -411,8 +463,14 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
           if (lane.type === 'slope') {
             const centerY = lane.yTop + TRACK_H / 2;
             const halfAmp = TRACK_H / 2 - 3;
-            const yOf = (slope) => centerY - Math.max(-1, Math.min(1, slope / slopeMax)) * halfAmp;
+            const yOf = (slope) => centerY - Math.max(-1, Math.min(1, slope / slopeScale)) * halfAmp;
             const pts = slopeSegs.map(s => ({ x: xPx(s.ts), slope: s.slope, y: yOf(s.slope) }));
+            // Simulated slope (dashed) — predicted from the food/insulin curves, on
+            // the same y-scale so it can be compared against the real slope.
+            const simPts = simSamples
+              .map(s => ({ x: xPx(s.ts), y: yOf(s.slope) }))
+              .filter(p => p.x >= LABEL_W - 0.5 && p.x <= plotR + 0.5);
+            const simD = simPts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
             // Split the polyline into single-sign sub-segments (interpolating the
             // exact zero crossing) so each piece can be coloured by direction.
             // Each sub-segment carries its stroke path (d) and a fill polygon down
@@ -447,15 +505,23 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
                 <text x={LABEL_W + 2} y={lane.yTop + TRACK_H - 2} fontSize={7} fill={SLOPE_DOWN_COLOR} opacity={0.85}>降↓</text>
                 {segs.length ? (
                   <>
-                    <title>血糖變化率（mg/dL/分）· 紅＝上升、藍＝下降</title>
+                    <title>實際血糖變化率（mg/dL/分）· 紅＝上升、藍＝下降</title>
                     {segs.map((sg, i) => (
                       <path key={i} d={sg.d} fill="none" stroke={sg.rising ? SLOPE_UP_COLOR : SLOPE_DOWN_COLOR}
                         strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" />
                     ))}
                   </>
                 ) : (
-                  <text x={LABEL_W + 22} y={centerY + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>資料不足</text>
+                  <text x={LABEL_W + 22} y={centerY + 3} fontSize={9} fill="var(--text-muted)" opacity={0.5}>實際血糖資料不足</text>
                 )}
+                {/* simulated slope predicted from food/insulin curves */}
+                {simPts.length >= 2 && (
+                  <>
+                    <title>模擬血糖變化率（由飲食/胰島素曲線推算）</title>
+                    <path d={simD} fill="none" stroke={SLOPE_SIM_COLOR} strokeWidth={1.6} strokeDasharray="4 2.5" strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                  </>
+                )}
+                <text x={plotR} y={lane.yTop + 8} fontSize={7} textAnchor="end" fill={SLOPE_SIM_COLOR} opacity={0.9}>┄ 模擬</text>
               </g>
             );
           }
@@ -958,6 +1024,8 @@ export default function Dashboard() {
               meals={mealEvents}
               insulin={ganttInsulinEvents}
               bgPoints={bgPoints}
+              icr={icr}
+              isf={isf}
               windowStart={xDomain[0]}
               windowEnd={xDomain[1]}
               xTicks={xTicks}
