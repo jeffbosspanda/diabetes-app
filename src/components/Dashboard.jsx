@@ -93,8 +93,35 @@ function foodGIProfile(food) {
 // glucose curve above; CHART_R matches the chart's right margin.
 const LABEL_W = 36;
 const CHART_R = 12;
-const GANTT_ROW_H = 26;
+const GANTT_SUB_H = 20;     // height of one sub-row (track) within a lane
+const GANTT_BLOCK_H = 15;   // visible block height (must be < GANTT_SUB_H)
 const MEAL_ABSORB_H = 2.5; // rough carb-absorption window for the meal lane
+
+// Interval-packing: when blocks overlap in time they must not be drawn on top of
+// each other. Greedily assign each block to the first sub-row (track) whose last
+// block has already ended; otherwise open a new track. Mutates blocks with .track
+// and returns how many tracks the lane needs (min 1 so empty lanes keep a row).
+function packTracks(blocks) {
+  const sorted = [...blocks].sort((a, b) => a.left - b.left);
+  const trackEnds = []; // right edge (%) of the last block placed on each track
+  const GAP = 0.4;      // small % gap so visually-touching blocks still split
+  for (const b of sorted) {
+    let placed = false;
+    for (let t = 0; t < trackEnds.length; t++) {
+      if (b.left >= trackEnds[t] + GAP) {
+        b.track = t;
+        trackEnds[t] = b.left + b.width;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      b.track = trackEnds.length;
+      trackEnds.push(b.left + b.width);
+    }
+  }
+  return { blocks: sorted, trackCount: Math.max(1, trackEnds.length) };
+}
 
 // Total action duration (hours): long-acting per brand; bolus from BRAND_PHARMA.
 const LONG_DURATION_H = { Lantus: 24, Toujeo: 36, Tresiba: 42, Levemir: 22, Basaglar: 24 };
@@ -192,19 +219,28 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
   });
 
   const lanes = [
-    { key: 'food',  label: '飲食\n影響', blocks: foodImpactBlocks },
-    { key: 'meal',  label: '餐點',       blocks: mealBlocks },
-    { key: 'long',  label: '長效',       blocks: longBlocks },
-    { key: 'bolus', label: '速效\n短效',  blocks: bolusBlocks },
+    { key: 'food',  label: '飲食\n影響', ...packTracks(foodImpactBlocks) },
+    { key: 'meal',  label: '餐點',       ...packTracks(mealBlocks) },
+    { key: 'long',  label: '長效',       ...packTracks(longBlocks) },
+    { key: 'bolus', label: '速效\n短效',  ...packTracks(bolusBlocks) },
   ];
+
+  const blockTop = (track) => track * GANTT_SUB_H + (GANTT_SUB_H - GANTT_BLOCK_H) / 2;
 
   return (
     <div className="gantt">
-      <div className="gantt-hint">區塊長度 = 作用持續時間 · 左緣 = 施打時間</div>
+      <div className="gantt-hint">區塊長度 = 作用持續時間 · 左緣 = 施打時間 · 同時段重疊者分列</div>
       {lanes.map(lane => (
-        <div className="gantt-row" key={lane.key} style={{ height: GANTT_ROW_H }}>
+        <div className="gantt-row" key={lane.key} style={{ height: lane.trackCount * GANTT_SUB_H }}>
           <span className="gantt-label">{lane.label}</span>
-          <div className="gantt-baseline" style={{ left: LABEL_W, right: CHART_R }} />
+          {/* one baseline per track so each sub-row reads as its own timeline */}
+          {Array.from({ length: lane.trackCount }, (_, t) => (
+            <div
+              key={`bl${t}`}
+              className="gantt-baseline"
+              style={{ left: LABEL_W, right: CHART_R, top: t * GANTT_SUB_H + GANTT_SUB_H / 2 }}
+            />
+          ))}
           {lane.blocks.map(b => (
             <div
               key={b.key}
@@ -213,6 +249,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
               style={{
                 left: `calc(${LABEL_W}px + (100% - ${LABEL_W + CHART_R}px) * ${b.left / 100})`,
                 width: `calc((100% - ${LABEL_W + CHART_R}px) * ${b.width / 100})`,
+                top: blockTop(b.track),
                 background: b.bg,
                 borderLeft: b.spillsLeft ? `2px dashed ${b.border}` : `2px solid ${b.border}`,
               }}
@@ -221,7 +258,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd }) {
             </div>
           ))}
           {lane.blocks.length === 0 && (
-            <span className="gantt-empty" style={{ left: LABEL_W + 6 }}>無</span>
+            <span className="gantt-empty" style={{ left: LABEL_W + 6, top: GANTT_SUB_H / 2 }}>無</span>
           )}
         </div>
       ))}
