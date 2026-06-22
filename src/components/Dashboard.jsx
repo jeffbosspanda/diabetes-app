@@ -182,7 +182,7 @@ function insulinPeakH(brandType) {
 // Each item is drawn as a smooth filled curve showing its action trend over time
 // (開始作用→增強中→峰值→減弱中→結束). Items that overlap in time within a lane are
 // split onto separate sub-rows (tracks) so curves never sit on top of each other.
-function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
+function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xTicks }) {
   const wrapRef = useRef(null);
   const [plotW, setPlotW] = useState(300);
   useEffect(() => {
@@ -243,10 +243,37 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
     });
   });
 
+  // Aggregate bolus (速效+短效) activity summed into one curve — total acute
+  // insulin "pressure" over time, for the 速短效累加 row.
+  const AGG_N = 80;
+  const aggSamples = [];
+  let aggMax = 0;
+  for (let k = 0; k <= AGG_N; k++) {
+    const ts = windowStart + span * k / AGG_N;
+    let val = 0;
+    for (const b of bolusItems) val += activityNorm(ts, b.startTs, b.peakTs, b.endTs, b.flat) * b.mag;
+    aggSamples.push({ ts, val });
+    if (val > aggMax) aggMax = val;
+  }
+
+  // BG rate-of-change (mg/dL per min) between consecutive readings, plotted as a
+  // bipolar curve (above zero = rising, below = falling) to compare against the
+  // insulin curves: active insulin should coincide with a downward BG slope.
+  const slopeSegs = [];
+  for (let i = 0; i + 1 < bgPoints.length; i++) {
+    const dtMin = (bgPoints[i + 1].ts - bgPoints[i].ts) / 60000;
+    if (dtMin <= 0) continue;
+    slopeSegs.push({ ts: (bgPoints[i].ts + bgPoints[i + 1].ts) / 2, slope: (bgPoints[i + 1].v - bgPoints[i].v) / dtMin });
+  }
+  let slopeMax = 0.5;
+  for (const s of slopeSegs) slopeMax = Math.max(slopeMax, Math.abs(s.slope));
+
   const lanes = [
-    { key: 'food',  label: '飲食\n影響', ...packTracks(foodItems) },
-    { key: 'long',  label: '長效',       ...packTracks(longItems) },
-    { key: 'bolus', label: '速效\n短效',  ...packTracks(bolusItems) },
+    { key: 'food',     label: '飲食\n影響', type: 'curves',    ...packTracks(foodItems) },
+    { key: 'long',     label: '長效',       type: 'curves',    ...packTracks(longItems) },
+    { key: 'bolus',    label: '速效\n短效',  type: 'curves',    ...packTracks(bolusItems) },
+    { key: 'bolusSum', label: '速短效\n累加', type: 'aggregate', trackCount: 1 },
+    { key: 'bgSlope',  label: '血糖\n斜率',  type: 'slope',     trackCount: 1 },
   ];
 
   // Vertical layout: stack lanes, each as tall as its track count needs.
@@ -265,7 +292,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
 
   return (
     <div className="gantt" ref={wrapRef}>
-      <div className="gantt-hint">曲線 = 作用強度趨勢（開始→增強→峰值→減弱→結束）· 起點 = 開始作用 · 同時段重疊者分列</div>
+      <div className="gantt-hint">曲線 = 作用強度趨勢（開始→增強→峰值→減弱→結束）· 起點 = 開始作用 · 同時段重疊者分列 · 速短效累加＝所有速效/短效相加 · 血糖斜率：零線以上升、以下降</div>
       <div className="gi-legend">
         {Object.values(GI_VIS).map(p => (
           <span key={p.zh} className="gi-legend-item">
@@ -283,15 +310,68 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
 
         {laid.map(lane => {
           const amp = TRACK_H - 11; // curve peak height; leaves room for label
+          // lane label (left gutter), vertically centred over its tracks
+          const laneLabelEls = lane.label.split('\n').map((ln, k, arr) => (
+            <text
+              key={`L${k}`} x={2} y={lane.yTop + lane.h / 2 + (k - (arr.length - 1) / 2) * 10 + 3}
+              fontSize={9} fontWeight={700} fill="var(--text-secondary)"
+            >{ln}</text>
+          ));
+
+          // ── Aggregate bolus row: one summed curve ──
+          if (lane.type === 'aggregate') {
+            const baseY = lane.yTop + TRACK_H - 4;
+            const max = aggMax > 0 ? aggMax : 1;
+            const pts = aggSamples.map(s => ({ x: xPx(s.ts), y: baseY - (s.val / max) * amp }));
+            const topD = pts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+            const fillD = `${topD}L${pts[pts.length - 1].x.toFixed(1)},${baseY}L${pts[0].x.toFixed(1)},${baseY}Z`;
+            return (
+              <g key={lane.key}>
+                {laneLabelEls}
+                <line x1={LABEL_W} y1={baseY} x2={plotR} y2={baseY} stroke="var(--border)" strokeWidth={0.7} />
+                {aggMax > 0 ? (
+                  <>
+                    <title>速效＋短效胰島素作用累加</title>
+                    <path d={fillD} fill={RAPID_COLOR} opacity={0.14} />
+                    <path d={topD} fill="none" stroke={RAPID_COLOR} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
+                  </>
+                ) : (
+                  <text x={LABEL_W + 6} y={lane.yTop + lane.h / 2 + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>無</text>
+                )}
+              </g>
+            );
+          }
+
+          // ── BG slope row: bipolar curve around a centred zero line ──
+          if (lane.type === 'slope') {
+            const centerY = lane.yTop + TRACK_H / 2;
+            const halfAmp = TRACK_H / 2 - 3;
+            const segPts = slopeSegs
+              .map(s => ({ x: xPx(s.ts), y: centerY - Math.max(-1, Math.min(1, s.slope / slopeMax)) * halfAmp }))
+              .filter(p => p.x >= LABEL_W - 0.5 && p.x <= plotR + 0.5);
+            const lineD = segPts.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+            return (
+              <g key={lane.key}>
+                {laneLabelEls}
+                <line x1={LABEL_W} y1={centerY} x2={plotR} y2={centerY} stroke="var(--border)" strokeWidth={0.8} strokeDasharray="3 3" />
+                <text x={LABEL_W + 2} y={lane.yTop + 8} fontSize={7} fill="var(--text-muted)" opacity={0.7}>升↑</text>
+                <text x={LABEL_W + 2} y={lane.yTop + TRACK_H - 2} fontSize={7} fill="var(--text-muted)" opacity={0.7}>降↓</text>
+                {segPts.length >= 2 ? (
+                  <>
+                    <title>血糖變化率（mg/dL/分）</title>
+                    <path d={lineD} fill="none" stroke={BG_COLOR} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" />
+                  </>
+                ) : (
+                  <text x={LABEL_W + 22} y={centerY + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>資料不足</text>
+                )}
+              </g>
+            );
+          }
+
+          // ── Default: individual activity curves, one per track ──
           return (
             <g key={lane.key}>
-              {/* lane label (left gutter), vertically centred over its tracks */}
-              {lane.label.split('\n').map((ln, k, arr) => (
-                <text
-                  key={k} x={2} y={lane.yTop + lane.h / 2 + (k - (arr.length - 1) / 2) * 10 + 3}
-                  fontSize={9} fontWeight={700} fill="var(--text-secondary)"
-                >{ln}</text>
-              ))}
+              {laneLabelEls}
 
               {/* per-track baseline + curves */}
               {Array.from({ length: lane.trackCount }, (_, t) => {
@@ -785,6 +865,7 @@ export default function Dashboard() {
             <ActionGantt
               meals={mealEvents}
               insulin={ganttInsulinEvents}
+              bgPoints={bgPoints}
               windowStart={xDomain[0]}
               windowEnd={xDomain[1]}
               xTicks={xTicks}
