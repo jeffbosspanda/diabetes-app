@@ -371,22 +371,33 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
             const pts = slopeSegs.map(s => ({ x: xPx(s.ts), slope: s.slope, y: yOf(s.slope) }));
             // Split the polyline into single-sign sub-segments (interpolating the
             // exact zero crossing) so each piece can be coloured by direction.
-            const segs = []; // { d, rising }
+            // Each sub-segment carries its stroke path (d) and a fill polygon down
+            // to the zero line (fillD), shaded light red (rising) / light blue (falling).
+            const seg = (ax, ay, bx, by, rising) => ({
+              d: `M${ax.toFixed(1)},${ay.toFixed(1)}L${bx.toFixed(1)},${by.toFixed(1)}`,
+              fillD: `M${ax.toFixed(1)},${ay.toFixed(1)}L${bx.toFixed(1)},${by.toFixed(1)}L${bx.toFixed(1)},${centerY.toFixed(1)}L${ax.toFixed(1)},${centerY.toFixed(1)}Z`,
+              rising,
+            });
+            const segs = [];
             for (let i = 0; i + 1 < pts.length; i++) {
               const a = pts[i], b = pts[i + 1];
               if (a.x > plotR + 0.5 || b.x < LABEL_W - 0.5) continue;
               if ((a.slope >= 0) === (b.slope >= 0)) {
-                segs.push({ d: `M${a.x.toFixed(1)},${a.y.toFixed(1)}L${b.x.toFixed(1)},${b.y.toFixed(1)}`, rising: a.slope + b.slope >= 0 });
+                segs.push(seg(a.x, a.y, b.x, b.y, a.slope + b.slope >= 0));
               } else {
                 const f = Math.abs(a.slope) / (Math.abs(a.slope) + Math.abs(b.slope));
                 const xz = a.x + (b.x - a.x) * f;
-                segs.push({ d: `M${a.x.toFixed(1)},${a.y.toFixed(1)}L${xz.toFixed(1)},${centerY.toFixed(1)}`, rising: a.slope >= 0 });
-                segs.push({ d: `M${xz.toFixed(1)},${centerY.toFixed(1)}L${b.x.toFixed(1)},${b.y.toFixed(1)}`, rising: b.slope >= 0 });
+                segs.push(seg(a.x, a.y, xz, centerY, a.slope >= 0));
+                segs.push(seg(xz, centerY, b.x, b.y, b.slope >= 0));
               }
             }
             return (
               <g key={lane.key}>
                 {laneLabelEls}
+                {/* area fills under the slope curve, down to the zero line */}
+                {segs.map((sg, i) => (
+                  <path key={`f${i}`} d={sg.fillD} fill={sg.rising ? SLOPE_UP_COLOR : SLOPE_DOWN_COLOR} opacity={0.18} stroke="none" />
+                ))}
                 <line x1={LABEL_W} y1={centerY} x2={plotR} y2={centerY} stroke="var(--border)" strokeWidth={0.8} strokeDasharray="3 3" />
                 <text x={LABEL_W + 2} y={lane.yTop + 8} fontSize={7} fill={SLOPE_UP_COLOR} opacity={0.85}>升↑</text>
                 <text x={LABEL_W + 2} y={lane.yTop + TRACK_H - 2} fontSize={7} fill={SLOPE_DOWN_COLOR} opacity={0.85}>降↓</text>
