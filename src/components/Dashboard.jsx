@@ -198,6 +198,9 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
 
   const span = windowEnd - windowStart;
   const xPx = (ts) => LABEL_W + Math.max(0, Math.min(1, (ts - windowStart) / span)) * plotW;
+  // Unclamped variant — for placing gradient stops across an action window that
+  // may start before / end after the visible window (cross-day long-acting).
+  const xPxRaw = (ts) => LABEL_W + ((ts - windowStart) / span) * plotW;
   // left/width (%) for track packing; spillsLeft = started before this window.
   const geom = (startTs, endTs) => {
     const rawLeft = (startTs - windowStart) / span * 100;
@@ -282,7 +285,7 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
   const lanes = [
     { key: 'foodSum',  label: '飲食\n綜合', type: 'aggregate', trackCount: 1, samples: foodAgg.samples,  max: foodAgg.max,  color: FOODAGG_COLOR, title: '所有食物升糖影響累加' },
     ...(showDetail ? [{ key: 'food', label: '飲食\n細項', type: 'curves', ...packTracks(foodItems) }] : []),
-    { key: 'long',     label: '長效',       type: 'curves',    ...packTracks(longItems) },
+    { key: 'long',     label: '長效',       type: 'longbars',  trackCount: 1, items: longItems },
     { key: 'bolusSum', label: '速短效\n綜合', type: 'aggregate', trackCount: 1, samples: bolusAgg.samples, max: bolusAgg.max, color: RAPID_COLOR,   title: '速效＋短效胰島素作用累加' },
     ...(showDetail ? [{ key: 'bolus', label: '速效\n短效', type: 'curves', ...packTracks(bolusItems) }] : []),
     { key: 'bgSlope',  label: '血糖\n斜率',  type: 'slope',     trackCount: 1 },
@@ -359,6 +362,47 @@ function ActionGantt({ meals, insulin, bgPoints = [], windowStart, windowEnd, xT
                 ) : (
                   <text x={LABEL_W + 6} y={lane.yTop + lane.h / 2 + 3} fontSize={10} fill="var(--text-muted)" opacity={0.5}>無</text>
                 )}
+              </g>
+            );
+          }
+
+          // ── Long-acting row: single-row Gantt bars (no curve). Each injection is
+          //    a semi-transparent bar so overlapping shots stay distinguishable; the
+          //    fill fades in at onset / out at taper and its depth scales with dose. ──
+          if (lane.type === 'longbars') {
+            const top = lane.yTop + 3;
+            const barH = TRACK_H - 6;
+            const midY = lane.yTop + TRACK_H / 2 + 3;
+            return (
+              <g key={lane.key}>
+                {laneLabelEls}
+                {lane.items.length === 0 && (
+                  <text x={LABEL_W + 6} y={midY} fontSize={10} fill="var(--text-muted)" opacity={0.5}>無</text>
+                )}
+                {lane.items.map((b, i) => {
+                  const x0 = xPx(Math.max(b.startTs, windowStart));
+                  const x1 = xPx(Math.min(b.endTs, windowEnd));
+                  if (x1 <= x0) return null;
+                  const peakOp = 0.30 + 0.32 * b.mag; // deeper colour = larger dose
+                  const gid = `lg-${i}`;
+                  return (
+                    <g key={b.key}>
+                      <title>{b.title}</title>
+                      <defs>
+                        <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1={xPxRaw(b.startTs)} y1="0" x2={xPxRaw(b.endTs)} y2="0">
+                          <stop offset="0"    stopColor={LONG_COLOR} stopOpacity="0" />
+                          <stop offset="0.10" stopColor={LONG_COLOR} stopOpacity={peakOp} />
+                          <stop offset="0.82" stopColor={LONG_COLOR} stopOpacity={peakOp} />
+                          <stop offset="1"    stopColor={LONG_COLOR} stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <rect x={x0} y={top} width={x1 - x0} height={barH} rx={3} fill={`url(#${gid})`} />
+                      {/* injection-start marker (skip when the shot began before the window) */}
+                      {!b.spillsLeft && <rect x={x0} y={top} width={2} height={barH} fill={LONG_COLOR} opacity={0.85} />}
+                      <text x={x0 + 4} y={midY} fontSize={8} fontWeight={700} fill={LONG_COLOR}>{b.label}</text>
+                    </g>
+                  );
+                })}
               </g>
             );
           }
