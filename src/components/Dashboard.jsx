@@ -101,6 +101,12 @@ function foodImpactMag(food, prof) {
   return Math.min(1, Math.max(0.2, gl / 40));
 }
 
+// Insulin curve peak scales with the injected dose — a larger shot peaks higher.
+// Maps units (typically 2–20U) to 0.25–1.0 of the track height.
+function insulinDoseMag(units) {
+  return Math.min(1, Math.max(0.25, (units ?? 0) / 16));
+}
+
 
 // ── Action Gantt geometry — aligned to the BG chart's plot area ──────────────
 // LABEL_W matches the chart's YAxis width so block x-positions line up with the
@@ -205,7 +211,7 @@ function ActionGantt({ meals, insulin, windowStart, windowEnd, xTicks }) {
     const peakTs = flat ? null : startTs + peakH * 3600000;
     const g = geom(startTs, endTs);
     return {
-      key: `i${i}`, startTs, peakTs, endTs, flat, mag: 1, color: insulinColor(l.brandType),
+      key: `i${i}`, startTs, peakTs, endTs, flat, mag: insulinDoseMag(l.units), color: insulinColor(l.brandType),
       label: `${insulinTypeLabel(l.brandType)}${l.units}U${g.spillsLeft ? ' ↵' : ''}`,
       title: `${insulinTypeLabel(l.brandType)} ${l.brand || ''} ${l.units}U · ${format(new Date(startTs), 'MM/dd HH:mm')} · 作用約 ${durH}h${g.spillsLeft ? '（前一天注射）' : ''}`,
       ...g,
