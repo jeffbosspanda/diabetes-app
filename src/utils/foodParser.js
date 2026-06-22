@@ -1,4 +1,4 @@
-import { lookupFood } from './foodDatabase.js';
+import { lookupFood, lookupFoodExact } from './foodDatabase.js';
 
 const ZH_NUM = { '零':0,'一':1,'二':2,'兩':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,'半':0.5 };
 
@@ -127,6 +127,20 @@ export function parseMealFoods(text) {
       }
       continue;
     }
+    // Whole-token exact match BEFORE quantity stripping, so foods whose name
+    // starts with a number-word (九層塔抓餅, 三明治…) aren't mis-read as a qty.
+    // No unit given → defaults to one serving (一份).
+    const exact = lookupFoodExact(token);
+    if (exact) {
+      result.push({
+        name: token,
+        carbs:   exact.carbs,
+        protein: exact.protein,
+        fat:     exact.fat,
+        gi:      exact.gi ?? null,
+      });
+      continue;
+    }
     const { qty, foodText } = extractQtyAndFood(token);
     const food = lookupFood(foodText) || trySubstring(foodText);
     if (food) {
@@ -176,7 +190,16 @@ export function parseMealText(text) {
       continue;
     }
 
-    // ③ Otherwise qty + food
+    // ③ Whole-token exact match BEFORE quantity stripping, so foods whose name
+    // starts with a number-word (九層塔抓餅, 三明治…) aren't mis-read as a qty.
+    // No unit given → defaults to one serving (一份).
+    const exact = lookupFoodExact(token);
+    if (exact) {
+      matched.push({ food: exact, scale: 1, label: token });
+      continue;
+    }
+
+    // ④ Otherwise qty + food
     const { qty, foodText } = extractQtyAndFood(token);
     const food = lookupFood(foodText) || trySubstring(foodText);
     if (food) {

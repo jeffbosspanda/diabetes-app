@@ -129,7 +129,7 @@ export const FOOD_DB = [
   { name: '蘿蔔糕', aliases: ['菜頭粿', '港式蘿蔔糕'], unit: '塊', gram: 100, carbs: 26, protein: 2, fat: 3, calories: 139, gi: 80 },
   { name: '燕麥', aliases: ['燕麥片', '麥片', '即食燕麥'], unit: '份', gram: 40, carbs: 26, protein: 5, fat: 3, calories: 155, gi: 55 },
   { name: '貝果', aliases: ['bagel'], unit: '個', gram: 100, carbs: 50, protein: 9, fat: 2, calories: 261, gi: 69 },
-  { name: '蔥油餅', aliases: ['抓餅', '手抓餅'], unit: '份', gram: 120, carbs: 38, protein: 6, fat: 14, calories: 302, gi: 65 },
+  { name: '蔥油餅', aliases: ['抓餅', '手抓餅', '九層塔抓餅', '蔥抓餅', '蛋抓餅', '起司抓餅'], unit: '份', gram: 120, carbs: 38, protein: 6, fat: 14, calories: 302, gi: 82 },
   { name: '白稀飯', aliases: ['地瓜粥', '番薯粥'], unit: '碗', gram: 250, carbs: 32, protein: 2, fat: 0.3, calories: 138, gi: 78 },
 
   // ── 常見料理（補強） ──
@@ -187,4 +187,12 @@ export function lookupFood(keyword) {
   if (!keyword) return null;
   // Curated DB first (has real servings + GI), then the extended per-100g table.
   return lookupIn(_lookup, keyword) || lookupIn(_ext, keyword);
+}
+
+// EXACT name/alias match only (no substring). Used by the parser to recognize a
+// whole token as one food BEFORE quantity stripping — otherwise food names that
+// start with a number-word (e.g. 「九層塔抓餅」→「九」) get mis-read as a quantity.
+export function lookupFoodExact(keyword) {
+  if (!keyword) return null;
+  return _lookup.get(keyword) || _ext.get(keyword) || null;
 }
