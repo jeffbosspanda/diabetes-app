@@ -209,6 +209,84 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
 - 全部改動經 Vite HMR 熱更新無錯（dev server 持續運行）。`insulinCalculator`/`cyclePhase` 兩支純函式以 node 單測通過。
 - 密碼/教學/生理期卡多在登入或特定條件後（女性+經期資料），preview 未登入未做互動截圖。
 
+### 2026-06-20 批次 2（餐點解析強化、LibreLink 對帳、彈窗、官方營養表）
+
+已 push 到 main，每筆觸發 Render 重部署。
+
+#### 餐點解析：自述碳水 / 單位 / 無法判斷（commit a6fb97d）
+- `src/utils/foodParser.js`：
+  - 重量單位加 **斤/台斤/臺斤=600g、兩=37.5g**（順序排好避免 公斤≠斤、kg≠g）。
+  - **自述碳水** `extractCarbDeclaration`：「碳水50」「50克碳水」「醣30」直接採用，系統不猜。
+  - **尾綴數量**：方糖兩顆=10、香蕉3根、水餃10顆（之前只解析前綴數量）。
+  - **無法判斷**：完全無法辨識且無自述碳水 → 回 `undetermined`（不再假報 0g 誤導劑量）；部分辨識 → `partial`（標示低估）。
+  - 修兩個既有 bug：單字模糊比對亂中（料→含糖飲料）→ 限 ≥2 字；模糊比對取**最長**鍵（葡萄糖一包不再被當葡萄）。
+- `src/utils/foodDatabase.js`：加葡萄糖（包=15g GI100）/方糖/蜂蜜/黑糖 + ~30 常見食物。`lookupFood` 改最長鍵 + ≥2 字防呆。
+- `src/components/MealLog.jsx`：碳水無法判斷顯示「無法判斷」+ 紅橫幅 + 一鍵改手動 + 擋存；部分→黃橫幅；逐項列加「❓無法判斷」；輸入提示更新。
+
+#### LibreLink 圖表＝來源（三次修正，重要）
+症狀：LibreLink 同步資料與系統圖表不一致。
+- **commit 79663fd**：(1) proxy 改用 `ValueInMgPerDl`（`Value` 是帳號顯示單位，mmol 帳號會與 mg/dL 圖表打架）。(2) 去重改「最新抓取為準」覆寫舊值（LibreLinkUp 會回補/平滑近 1h 數值）。
+- **commit 1758e59（最終解法）**：**整窗權威對帳**。每次同步取 LibreLink 回傳 12h 窗 [最早,最晚]：窗外累積歷史不動，**窗內整段用最新資料整批取代**。自動：值變了→修正、新點→新增、系統多餘/重複點→清除。
+  - `src/store/AppContext.jsx`：`RECONCILE_GLUCOSE` reducer（窗內整批換）。
+  - `src/components/LibreSync.jsx`：前端即時同步用之，訊息「新增/修正/清除過時」。
+  - `server/libre-proxy.js` `mergeGlucose`：後端排程同邏輯（保留 90 天累積、窗內權威）。
+- 注意：>12h 舊歷史無法自動修（LibreLink 無此端點）；要全淨化 → 設定→清除血糖→重新同步。**須部署 + 手動同步一次才見效**。
+
+#### 編輯餐點改彈窗（commit 6180c72）
+- `src/components/MealLog.jsx`：新增/編輯表單包進 `.meal-form-overlay` 置中 modal（自帶捲動 + ✕ 關閉 + 鎖 body 捲動），不再捲回上方輸入區搞混。移除 scrollIntoView effect。
+- `src/App.css`：`.meal-form-overlay`/`.meal-form-modal*`。
+
+#### 官方營養表 1647 筆（commit 58434c5）
+- 來源：使用者提供 `nutrition_table_ai_friendly.csv`（台灣官方 per-100g 淨碳水/蛋白/熱量/纖維）。
+- `src/utils/nutritionExt.js`（**自動產生**，67KB）：生成器 NFKC 正規化（番⽯榴→番石榴）、濾雜訊列、拆主名/別名；2156 列→1647 筆。格式 `[主名,[別名],淨碳水100g,蛋白100g,熱量100g,纖維100g]`。
+- `src/utils/foodDatabase.js`：`lookupFood` 加官方表**後備**（手刻庫優先：有真實份量+GI；查無才落官方表，以 100g 為基準依重量/份數換算）。
+- 限制：官方表**無 GI、無脂肪**（gi:null、fat:0）→ 升糖分類退為碳水量判斷；碳水用淨碳水。bundle +67KB（gzip ~15-20KB），留意 Render OOM。
+
+#### 升糖標籤矛盾修正（commit f06ae52）
+- 症狀：葡萄糖整餐顯示「緩慢升糖」、逐項顯示「快速升糖」同畫面打架。
+- 根因：`classifyGlycemicResponse` 只讀 `highGICount`（數字），但分析卡傳整個 `analysis`（含 `highGI` 陣列）→ count 讀成 0 → 高 GI 餐誤判緩慢。
+- 修 `src/utils/glycemicResponse.js`：同時接受 `highGICount` 或 `highGI` 陣列自動取數。整餐/逐項/classifyMeal 三路徑同源一致。
+
+#### 本批驗證
+- 純函式（foodParser/foodDatabase/glycemicResponse/cyclePhase/mergeGlucose）皆以 node 單測通過。
+
+### 2026-06-22 批次（UI 配色對齊主視覺、注射改彈窗、快取修正、首頁直接同步）
+
+皆已 push main，逐筆觸發 Render 重部署。
+
+#### 飲食頁配色/彈窗對齊主視覺（commit 896c012、cea3737、64548eb）
+- `.btn-icon`（飲食/血糖/Dashboard 三處 header 共用 +/👤 鈕）：灰底 → 主色 teal 漸層填色 + 白 icon + 放大（padding 6→9、radius 8→12、加陰影）；hover/active/focus 對齊主視覺（取代瀏覽器預設藍焦點框）。飲食 add Plus `size 20→24` 加粗。
+- 新增食物 modal：原 `.card` glass 半透明（62% 白）疊暗 backdrop → 文字糊；改 `--surface-solid` 實心白底 + 去 blur。
+- off-brand 紫 `#6366f1` 全換 teal：`.analysis-card`、`.btn-analyze`、`.mode-tab-active`、`.bg-time-badge`。
+- 低對比淺黃字 `#f59e0b/--yellow` 壓淺底 → 深化 `#b45309`（可讀）：`auto-bg-warn`、`conf-medium`、`meal-feedback-note`、`tag-yellow`。
+- `.btn-primary:disabled` 原灰綠底 `#cdded9`+白字 → 白底 + teal 字 + 淡 teal 框（「記錄這餐」未填好時清楚可讀、符主視覺）。
+
+#### 手動記錄注射改 modal（commit 93a0b9b）
+- `src/components/InsulinAdvisor.jsx`：原頁面內 inline card → header「+」鈕觸發置中 modal（複用 `meal-form-overlay`/`meal-form-modal`，參考「記錄這餐」）；存檔後自動關閉、body 鎖捲動、加取消鈕。表單欄位/邏輯不變。
+
+#### ⚠️ 手機看不到更新 → 快取修正（commit 0ee9a0c）（重要；先前 Render deploy 失敗疑慮已解，deploy 正常）
+- 症狀：新部署後手機看不到改動。診斷：線上 bundle 其實已是最新（curl 驗 CSS teal、JS `meal-form-overlay`=2），SW 不快取資產 → 根因是**手機快取舊 app shell**（PWA/瀏覽器 HTTP cache 存舊 index.html，指向舊 hashed bundle）。
+- `server/libre-proxy.js`：hashed `/assets/*` → `Cache-Control: public, max-age=31536000, immutable`；`index.html`/`sw.js`/`manifest` + SPA fallback → `no-store, no-cache, must-revalidate`（shell 每次重抓 → 永遠指向最新 bundle）。
+- `src/main.jsx`：每次 load `reg.update()` 查新 SW；新 SW 取得控制權（`controllerchange`，真更新）時自動 `reload()` 一次（用 `hadController` 旗標避開首次安裝的無謂 reload）。
+- 踩坑：**no-store 規則生效前手機已快取的舊 shell 對新規則無效**，需手動清一次（瀏覽器強制重整/清網站資料；PWA 移除圖示再重加），之後每次部署自動更新。
+
+#### 注射紀錄/營養建議「顯示更多」（commit 7d01964）
+- `InsulinAdvisor.jsx` 最近注射紀錄：預設 5 筆，>5 顯示「顯示更多（共 N 筆）」/收合（`showAllLogs`）。
+- `MealLog.jsx` 營養素分析與建議：合併營養+飲食建議成單一陣列，預設 3 個，>3 顯示「顯示更多（共 N 個建議）」/收合（`showAllAdvice`）。
+
+#### 最近飲食紀錄移除整餐 tag + 柔化升糖配色（commit 92ba301）
+- `MealLog.jsx`：最近飲食紀錄列移除「整餐」升糖 tag（`classifyMeal`），只留逐項食物升糖；移除已無用的 `classifyMeal` import。
+- `src/utils/glycemicResponse.js`：升糖型態色降飽和、對齊主視覺（共用全 app）：fast `#ef4444→#e08585`、delayed `#f59e0b→#d4a85c`、minimal `#22c55e→#5cb89a`、fatProtein `#a855f7→#7f9cc4`（off-brand 紫 → 柔藍）。
+
+#### 首頁「同步 LibreLink」直接同步（commit 8fb5b46）
+- `Dashboard.jsx`：30分預測卡 + 空時間軸的「同步 LibreLink」按鈕原 `nav('/glucose')` 跳轉 → 改就地 `syncLibreData` + `RECONCILE_GLUCOSE`（與 LibreSync 同源整窗對帳）+ 標記 integration；含 spinner + 錯誤訊息。未存帳密時才退回導向血糖頁。
+
+#### 本批環境/驗證
+- **本機 vite 已修復可跑**：先前 `vite` 不在 PATH 是 `node_modules` 不完整（vite 套件未裝），`npm install` 補裝 259 包後正常（這次無 EPERM）。dev server `preview_start` 跑在 5173。
+- 驗證手法：因登入閘擋頁，本機驗 UI 時暫時 bypass `App.jsx` Gate（`if(false && ...)`），截圖/inspect 後**還原**（未進版控）。配色/彈窗/disabled 鈕/注射 modal/移除整餐 tag/柔色 皆截圖或 inspect 確認。
+- 線上輪詢確認部署到位（curl 抓 hashed bundle 比對新字串）；HTML header 已驗 `no-store`。
+- 注射同步、首頁直接同步需後端 proxy + 已存帳密，本機無法完整實測，邏輯與血糖頁「立即同步」同源。
+
 ## Render 環境變數（在 Dashboard 設，勿進版控）
 
 - `ANTHROPIC_API_KEY`（食物辨識，前端尚未接，可留空）
