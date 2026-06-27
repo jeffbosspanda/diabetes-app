@@ -88,6 +88,87 @@ async function callNvidiaChat(prompt) {
   return text;
 }
 
+// Vision call — same OpenAI-compatible endpoint, a vision-capable model, and an
+// image_url data-URL part. The frontend compresses the photo to stay inline.
+const NVIDIA_VISION_MODEL = process.env.NVIDIA_VISION_MODEL || 'meta/llama-3.2-90b-vision-instruct';
+async function callNvidiaVision(prompt, dataUrl) {
+  const res = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getNvidiaKey()}` },
+    body: JSON.stringify({
+      model: NVIDIA_VISION_MODEL,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      }],
+      temperature: 0.2,
+      max_tokens: 1500,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`NVIDIA ${res.status} ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('NVIDIA 回傳格式錯誤');
+  return text;
+}
+
+// Shared nutrition prompt pieces (used by both text and photo endpoints).
+const FOOD_ANCHORS = `【常見台灣食物份量錨點（每份熟重與營養，供校準，依實際份量比例調整，勿照抄）】
+主食：
+- 白飯一碗≈200g/碳水53g；糙米飯一碗≈200g/碳水42g；稀飯一碗≈250g/碳水28g
+- 麵條一碗(熟)≈200g/碳水55g；米粉/冬粉一份≈碳水40-46g；烏龍麵一碗≈碳水52g
+- 吐司1片≈30g/碳水15g；饅頭1個≈80g/碳水38g；貝果1個≈碳水50g；麵包1個≈碳水40g
+- 水餃1顆≈25g/碳水9g(10顆≈90g碳水)；蛋餅一份≈碳水30g；抓餅/蔥油餅一份≈碳水38g/脂肪14g
+- 地瓜1條≈150g/碳水36g；玉米1根≈碳水30g；馬鈴薯1顆≈碳水30g
+便當/小吃：
+- 雞腿/排骨便當一份≈碳水65-75g/蛋白25g/脂肪20g
+- 滷肉飯/肉燥飯一碗≈碳水50g/脂肪15g；炒飯一份≈碳水58g/脂肪12g；咖哩飯一份≈碳水70g
+- 牛肉麵一碗≈碳水62g/蛋白25g；鹽酥雞一份≈碳水20g/蛋白20g/脂肪18g
+- 滷味/關東煮依品項；蚵仔煎一份≈碳水30g/脂肪12g
+蛋白質(碳水近0)：
+- 雞蛋1顆≈蛋白7g/脂肪5g；雞胸肉150g≈蛋白35g；雞腿150g≈蛋白28g/脂肪10g
+- 魚一份150g≈蛋白28g；豬里肌150g≈蛋白30g；豆腐一塊150g≈碳水3g/蛋白8g
+蔬菜(每份100g)：葉菜≈碳水4g；花椰菜≈碳水5g；菇類≈碳水4-6g
+水果：香蕉1根≈碳水27g；蘋果1顆≈碳水28g；芭樂1顆≈碳水16g；橘子1顆≈碳水23g；西瓜一份≈碳水14g
+飲料/甜點：珍珠奶茶中杯≈碳水60g；含糖飲料一杯≈碳水42g；無糖茶/黑咖啡≈碳水0；蛋糕1片≈碳水36g
+補糖：葡萄糖1包≈碳水15g；方糖1顆≈碳水5g；蜂蜜1匙≈碳水17g`;
+
+const FOOD_JSON_SPEC = `僅回傳以下 JSON（不要其他文字、不要 markdown 圍欄、不要註解）：
+{
+  "items": [ { "name": "食物名", "grams": 份量克數, "carbs": 該項碳水g, "protein": 該項蛋白g, "fat": 該項脂肪g } ],
+  "foods": ["食物名稱列表"],
+  "carbs": 總碳水g,
+  "protein": 總蛋白g,
+  "fat": 總脂肪g,
+  "calories": 總熱量kcal,
+  "fiber": 膳食纖維g,
+  "highGI": [ { "name": "食物名", "gi": GI整數, "warning": "對血糖影響與建議(30字內)" } ],
+  "micros": [ { "name": "營養素(鈉/鉀/鈣/鐵/維生素C/Omega-3等)", "amount": "概略量或豐富/中等/少量", "note": "簡短說明(20字內)" } ],
+  "diabetesNotes": "給糖尿病患者的整體建議(100字內)",
+  "confidence": "high|medium|low"
+}`;
+
+// Parse the model's JSON reply, normalize numeric fields, and guard calories.
+function finalizeNutrition(out) {
+  const jsonMatch = out.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('模型回傳格式錯誤');
+  const result = JSON.parse(jsonMatch[0]);
+  for (const k of ['carbs', 'protein', 'fat', 'calories', 'fiber']) {
+    result[k] = Math.round(Number(result[k]) || 0);
+  }
+  const macroCal = 4 * result.carbs + 4 * result.protein + 9 * result.fat;
+  if (macroCal > 0 && (!result.calories || Math.abs(result.calories - macroCal) / macroCal > 0.25)) {
+    result.calories = Math.round(macroCal);
+  }
+  return result;
+}
+
 // Known working app versions (try newest first)
 const CLIENT_VERSION = '4.16.0';
 const PRODUCT = 'llu.android';
@@ -562,57 +643,37 @@ if (supabaseAdmin) {
   setInterval(() => { syncAllUsers().catch(e => console.error('[Cron]', e.message)); }, 6 * 60 * 60 * 1000);
 }
 
-// ── Food photo analysis ──────────────────────────────────────────
+// ── Food PHOTO analysis (NVIDIA vision) ───────────────────────────
+// User uploads a meal photo; a vision model identifies the foods and estimates
+// the same nutrition JSON shape as the text endpoint.
 app.post('/api/analyze-food', async (req, res) => {
-  // Optional shared-secret gate to protect the paid Anthropic endpoint.
-  // If ACCESS_KEY is unset, endpoint stays open (local dev).
-  if (process.env.ACCESS_KEY && req.get('x-access-key') !== process.env.ACCESS_KEY) {
-    return res.status(401).json({ error: '存取金鑰錯誤' });
+  try {
+    await gateFoodEndpoint(req);
+  } catch (e) {
+    return res.status(e.status || 401).json({ error: e.message });
   }
   const { imageBase64, mediaType = 'image/jpeg' } = req.body;
   if (!imageBase64) return res.status(400).json({ error: '需要圖片資料' });
 
   try {
-    const anthropic = getAnthropicClient();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
-          },
-          {
-            type: 'text',
-            text: `你是糖尿病營養分析師。請分析這張食物照片，回傳以下 JSON（僅回傳 JSON，不要其他文字）：
-{
-  "foods": ["食物名稱列表"],
-  "carbs": 數字(g),
-  "protein": 數字(g),
-  "fat": 數字(g),
-  "calories": 數字(kcal),
-  "highGI": [
-    { "name": "食物名", "gi": GI指數, "warning": "對血糖的影響說明" }
-  ],
-  "diabetesNotes": "給糖尿病患者的整體飲食建議（100字內）",
-  "confidence": "high|medium|low"
-}
-GI > 70 為高GI，需列入 highGI 陣列。碳水估算請考慮烹調方式與份量。`,
-          },
-        ],
-      }],
-    });
+    const prompt = `你是專業糖尿病營養師。請辨識這張食物照片中的所有食物並估算整餐營養。
 
-    const text = message.content[0].text.trim();
-    // Extract JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('模型回傳格式錯誤');
-    const result = JSON.parse(jsonMatch[0]);
+【務必逐項計算】先辨識照片中每樣食物與其份量（公克，依餐具大小與比例判斷），再依下方錨點換算每項碳水/蛋白/脂肪後加總。
+
+${FOOD_ANCHORS}
+
+【一致性自檢（重要）】總熱量必須 ≈ 4×總碳水 + 4×總蛋白 + 9×總脂肪（誤差±10%）。
+
+${FOOD_JSON_SPEC}
+
+規則：所有數字為阿拉伯數字。GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。照片看不清或無法判斷時 confidence 設 "low" 並在 diabetesNotes 說明。`;
+
+    const out = (await callNvidiaVision(prompt, `data:${mediaType};base64,${imageBase64}`)).trim();
+    const result = finalizeNutrition(out);
+    result.source = 'ai';
     res.json(result);
   } catch (err) {
-    console.error('[FoodAnalysis]', err.message);
+    console.error('[FoodPhotoAnalysis]', err.message);
     res.status(500).json({ error: `分析失敗：${err.message}` });
   }
 });
@@ -660,59 +721,16 @@ app.post('/api/analyze-food-text', async (req, res) => {
 2. 對每一項，依「每100g 的營養」× 實際克數，算出該項碳水、蛋白、脂肪。
 3. 加總得到${focusMode ? '「上述待估食物」的' : '整餐'}總碳水、總蛋白、總脂肪。
 
-【常見台灣食物份量錨點（每份熟重與營養，供校準，依實際份量比例調整，勿照抄）】
-主食：
-- 白飯一碗≈200g/碳水53g；糙米飯一碗≈200g/碳水42g；稀飯一碗≈250g/碳水28g
-- 麵條一碗(熟)≈200g/碳水55g；米粉/冬粉一份≈碳水40-46g；烏龍麵一碗≈碳水52g
-- 吐司1片≈30g/碳水15g；饅頭1個≈80g/碳水38g；貝果1個≈碳水50g；麵包1個≈碳水40g
-- 水餃1顆≈25g/碳水9g(10顆≈90g碳水)；蛋餅一份≈碳水30g；抓餅/蔥油餅一份≈碳水38g/脂肪14g
-- 地瓜1條≈150g/碳水36g；玉米1根≈碳水30g；馬鈴薯1顆≈碳水30g
-便當/小吃：
-- 雞腿/排骨便當一份≈碳水65-75g/蛋白25g/脂肪20g
-- 滷肉飯/肉燥飯一碗≈碳水50g/脂肪15g；炒飯一份≈碳水58g/脂肪12g；咖哩飯一份≈碳水70g
-- 牛肉麵一碗≈碳水62g/蛋白25g；鹽酥雞一份≈碳水20g/蛋白20g/脂肪18g
-- 滷味/關東煮依品項；蚵仔煎一份≈碳水30g/脂肪12g
-蛋白質(碳水近0)：
-- 雞蛋1顆≈蛋白7g/脂肪5g；雞胸肉150g≈蛋白35g；雞腿150g≈蛋白28g/脂肪10g
-- 魚一份150g≈蛋白28g；豬里肌150g≈蛋白30g；豆腐一塊150g≈碳水3g/蛋白8g
-蔬菜(每份100g)：葉菜≈碳水4g；花椰菜≈碳水5g；菇類≈碳水4-6g
-水果：香蕉1根≈碳水27g；蘋果1顆≈碳水28g；芭樂1顆≈碳水16g；橘子1顆≈碳水23g；西瓜一份≈碳水14g
-飲料/甜點：珍珠奶茶中杯≈碳水60g；含糖飲料一杯≈碳水42g；無糖茶/黑咖啡≈碳水0；蛋糕1片≈碳水36g
-補糖：葡萄糖1包≈碳水15g；方糖1顆≈碳水5g；蜂蜜1匙≈碳水17g
+${FOOD_ANCHORS}
 
 【一致性自檢（重要）】總熱量必須 ≈ 4×總碳水 + 4×總蛋白 + 9×總脂肪（誤差±10%）。若不符，回頭檢查各項克數是否離譜後再修正。
 
-僅回傳以下 JSON（不要其他文字、不要 markdown 圍欄、不要註解）：
-{
-  "items": [ { "name": "食物名", "grams": 份量克數, "carbs": 該項碳水g, "protein": 該項蛋白g, "fat": 該項脂肪g } ],
-  "foods": ["食物名稱列表"],
-  "carbs": 總碳水g,
-  "protein": 總蛋白g,
-  "fat": 總脂肪g,
-  "calories": 總熱量kcal,
-  "fiber": 膳食纖維g,
-  "highGI": [ { "name": "食物名", "gi": GI整數, "warning": "對血糖影響與建議(30字內)" } ],
-  "micros": [ { "name": "營養素(鈉/鉀/鈣/鐵/維生素C/Omega-3等)", "amount": "概略量或豐富/中等/少量", "note": "簡短說明(20字內)" } ],
-  "diabetesNotes": "給糖尿病患者的整體建議(100字內)",
-  "confidence": "high|medium|low"
-}
+${FOOD_JSON_SPEC}
 
 規則：所有數字為阿拉伯數字（不要範圍、不要文字）。${focusMode ? '上述各營養值只計「待估食物」，不要包含已由資料庫計算的部分。' : ''}GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`;
 
     const out = (await callNvidiaChat(prompt)).trim();
-    const jsonMatch = out.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('模型回傳格式錯誤');
-    const result = JSON.parse(jsonMatch[0]);
-    // Normalize numeric fields so the UI never renders NaN.
-    for (const k of ['carbs', 'protein', 'fat', 'calories', 'fiber']) {
-      result[k] = Math.round(Number(result[k]) || 0);
-    }
-    // Calorie consistency guard — if the model's kcal is wildly off from the
-    // macro-derived value (4/4/9), recompute it so the card never shows nonsense.
-    const macroCal = 4 * result.carbs + 4 * result.protein + 9 * result.fat;
-    if (macroCal > 0 && (!result.calories || Math.abs(result.calories - macroCal) / macroCal > 0.25)) {
-      result.calories = Math.round(macroCal);
-    }
+    const result = finalizeNutrition(out);
     result.source = 'ai';
     res.json(result);
   } catch (err) {
