@@ -358,3 +358,48 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
   `git checkout origin/main -- .claude/progress.md` 還原 GitHub 完整版再附加，
   純新增不刪除原內容。push 前若被 reject，先 fetch 並把變更 rebase 到最新
   origin 的 progress.md 上重新附加，避免覆蓋他人批次。
+
+---
+
+## 2026-06-27 批次：食物分析修正 + 新增餐點文字 AI 辨識
+
+### 任務
+1. 修正食物 GI 誤判（九層塔抓餅被當低 GI、開頭「九」被當數量 9）。
+2. 新增餐點「自動分析」改由 AI 辨識碳水/蛋白/脂肪/纖維/各種營養素。
+3. AI 數值離譜 → 升級模型 + 逐項計算 + 熱量自檢。
+
+### 已修改檔案
+- `src/utils/foodDatabase.js`：蔥油餅/抓餅系列 GI 65→82，新增別名（九層塔抓餅等）；
+  新增 `lookupFoodExact()`（整字精確比對，不做 substring）。
+- `src/utils/foodParser.js`：parseMealText / parseMealFoods 在拆數量前先做整字精確比對，
+  避免「九層塔抓餅」開頭「九」被誤判為數量 9；未填單位預設一份（scale=1）。
+- `server/libre-proxy.js`：新增 `POST /api/analyze-food-text`（Claude 文字營養分析），
+  以 Supabase 登入 JWT 守門（`gateFoodEndpoint` → `userFromBearer`，無 Supabase/ACCESS_KEY 才開放）；
+  模型 haiku-4-5 → **sonnet-4-6**；prompt 強制逐項拆解（食物→份量 g→每項 macros→加總）＋
+  台灣份量錨點＋熱量一致性自檢；後端再加防線：kcal 偏離 4C+4P+9F 超過 25% 即以 macro 重算。
+- `src/utils/foodAiAnalysis.js`（新）：帶 Supabase token 呼叫端點，任何錯誤自動 fallback 本地 parseMealText。
+- `src/components/MealLog.jsx`：handleAnalyze 改 async（先本地即時、AI 再升級）；spinner、
+  AI/本地來源徽章、膳食纖維＋micros chips；存檔保存 fiber/micros/analysisSource。
+- `src/App.css`：.ai-badge / .btn-spinner / .micros-section / .micro-chip 樣式。
+
+### 對應 commit
+- 37509f4 抓餅 GI 修正 + 開頭數字防誤判
+- 87a455f 文字輸入 AI 辨識營養（端點 + 前端接線）
+- 425ce73 修數值離譜（sonnet-4-6 + 逐項計算 + 熱量自檢）
+
+### 測試指令與結果
+- `npm run build` → 通過（僅既有 chunk >500kB 警告）。
+- preview 本機實測：輸入「九層塔抓餅、雞胸肉一份、青菜」→分析，食物正確拆解、
+  九層塔抓餅顯示 GI 82 高GI；本機無後端故走 fallback 顯示「本地」。
+- AI 路徑無法本機測（需 Render 上的 ANTHROPIC_API_KEY），須部署後實測。
+
+### 待辦 / 待確認
+- 部署後實測 AI 數值是否合理（建議測「白飯一碗」「便當」「珍奶」）。
+- 若仍偏差 → 改混合架構：本地精選 DB（~90 種台灣食物實測份量+GI）為 ground truth，
+  命中項目直接採 DB 值，僅長尾交 AI 估算。
+
+### 踩坑點
+- `/api/analyze-food-text` 靠 Supabase 登入守門 → Render 需有 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY（已設）；
+  此端點不依賴 ACCESS_KEY。前端同源以相對路徑 /api 呼叫，dev 由 vite proxy 到 localhost:3001。
+- 食物名開頭含中文數字（九層塔…）會被解析器當數量 → 已用整字精確比對擋掉，新增同類食物時優先放進 DB 名稱/別名。
+- 模型營養估算用 haiku 會數值離譜，需 sonnet 等級；務必要求逐項計算＋熱量自檢，否則易亂給克數。
