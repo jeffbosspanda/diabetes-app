@@ -306,9 +306,10 @@ export default function MealLog() {
               <div className="analysis-header">
                 <Zap size={14} color="var(--accent2)" />
                 <span>營養分析結果</span>
-                {analysis.source === 'ai'
-                  ? <span className="ai-badge">✨ AI</span>
-                  : <span className="ai-badge ai-badge-local">本地</span>}
+                {analysis.source === 'db'     && <span className="ai-badge ai-badge-db">📚 資料庫</span>}
+                {analysis.source === 'hybrid' && <span className="ai-badge">📚＋✨ DB+AI</span>}
+                {analysis.source === 'ai'     && <span className="ai-badge">✨ AI</span>}
+                {analysis.source === 'local'  && <span className="ai-badge ai-badge-local">本地</span>}
                 <span className={`confidence-badge conf-${analysis.confidence}`}>
                   {analysis.confidence === 'high' ? '高信心'
                     : analysis.confidence === 'medium' ? '中信心'

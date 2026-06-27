@@ -607,8 +607,18 @@ app.post('/api/analyze-food-text', async (req, res) => {
   } catch (e) {
     return res.status(e.status || 401).json({ error: e.message });
   }
-  const { text } = req.body;
+  const { text, foods } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: '需要餐點描述文字' });
+
+  // Hybrid mode: the frontend already matched part of the meal against the
+  // curated local DB (accurate, ground-truth) and passes ONLY the foods it
+  // could NOT resolve. We then estimate just that long tail. `target` describes
+  // exactly what to estimate so the model stays focused and doesn't double-count.
+  const focus = Array.isArray(foods) ? foods.filter(f => f && f.trim()) : [];
+  const focusMode = focus.length > 0;
+  const target = focusMode
+    ? `這餐的部分食物已由資料庫精確計算，你只需估算以下「資料庫未收錄」的食物（其餘請完全忽略、不要列入）：\n${focus.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n（原始完整描述僅供判斷份量語境：「${text}」）`
+    : `請估算整餐的營養。餐點描述：「${text}」`;
 
   try {
     const anthropic = getAnthropicClient();
@@ -619,12 +629,12 @@ app.post('/api/analyze-food-text', async (req, res) => {
       max_tokens: 1500,
       messages: [{
         role: 'user',
-        content: `你是專業糖尿病營養師。請估算這餐的營養。餐點描述：「${text}」
+        content: `你是專業糖尿病營養師。${target}
 
 【務必逐項計算，不要直接猜總值】
-1. 先把描述拆成個別食物，標出每項的份量（公克）。未指定份量時用台灣常見「一份」份量。
-2. 對每一項，依「每100g 的營養」× 實際克數，算出該項的碳水、蛋白、脂肪。
-3. 最後加總，得到整餐總碳水、總蛋白、總脂肪。
+1. 把要估算的食物逐項列出，標出每項份量（公克）。未指定份量時用台灣常見「一份」份量。
+2. 對每一項，依「每100g 的營養」× 實際克數，算出該項碳水、蛋白、脂肪。
+3. 加總得到${focusMode ? '「上述待估食物」的' : '整餐'}總碳水、總蛋白、總脂肪。
 
 【常見台灣份量錨點（每份熟重與碳水，供校準，勿照抄）】
 - 白飯一碗≈200g/碳水53g；糙米飯一碗≈200g/碳水42g；稀飯一碗≈250g/碳水28g
@@ -635,7 +645,7 @@ app.post('/api/analyze-food-text', async (req, res) => {
 - 香蕉1根≈碳水27g；蘋果1顆≈碳水28g；珍珠奶茶中杯≈碳水60g
 - 葉菜類一份100g≈碳水4g；豆腐一塊150g≈碳水3g/蛋白8g
 
-【一致性自檢（重要）】熱量必須 ≈ 4×總碳水 + 4×總蛋白 + 9×總脂肪（誤差±10%）。若不符，回頭檢查各項克數是否離譜後再修正。
+【一致性自檢（重要）】總熱量必須 ≈ 4×總碳水 + 4×總蛋白 + 9×總脂肪（誤差±10%）。若不符，回頭檢查各項克數是否離譜後再修正。
 
 僅回傳以下 JSON（不要其他文字、不要 markdown 圍欄、不要註解）：
 {
@@ -652,7 +662,7 @@ app.post('/api/analyze-food-text', async (req, res) => {
   "confidence": "high|medium|low"
 }
 
-規則：所有數字為阿拉伯數字（不要範圍、不要文字）。GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`,
+規則：所有數字為阿拉伯數字（不要範圍、不要文字）。${focusMode ? '上述各營養值只計「待估食物」，不要包含已由資料庫計算的部分。' : ''}GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`,
       }],
     });
 

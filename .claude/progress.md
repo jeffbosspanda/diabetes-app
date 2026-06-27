@@ -403,3 +403,39 @@ Supabase 專案：submadhgvbiblcurnktt（https://submadhgvbiblcurnktt.supabase.c
   此端點不依賴 ACCESS_KEY。前端同源以相對路徑 /api 呼叫，dev 由 vite proxy 到 localhost:3001。
 - 食物名開頭含中文數字（九層塔…）會被解析器當數量 → 已用整字精確比對擋掉，新增同類食物時優先放進 DB 名稱/別名。
 - 模型營養估算用 haiku 會數值離譜，需 sonnet 等級；務必要求逐項計算＋熱量自檢，否則易亂給克數。
+
+---
+
+## 2026-06-27 批次：食物分析改混合架構（本地 DB 為準、AI 補長尾）
+
+### 任務
+AI 文字分析「數值離譜」根治：常見食物以本地精選 DB 實測值為 ground truth，
+只有 DB 未收錄的長尾食物才送 AI 估算後合併。
+
+### 運作
+1. 前端先跑 parseMealText → DB 命中項目用實測數值，列出 unmatched 長尾。
+2. 全部命中 → 直接回傳 DB 結果，不呼叫 AI（source='db'，badge 📚 資料庫）。
+3. 有長尾 → 只把 unmatched 送 AI（POST body 帶 foods 清單），AI 小計合併到 DB 小計
+   （source='hybrid'，badge 📚＋✨）。
+4. 全未命中 → AI 估全部（source='ai'）；AI 失敗 fallback 本地（source='local'）。
+
+### 已修改檔案
+- `src/utils/foodAiAnalysis.js`：改寫為混合協調器（DB 優先、長尾合併、graceful fallback）。
+- `server/libre-proxy.js`：/api/analyze-food-text 新增 foods 參數＝指定待估清單，
+  prompt 改 focus 模式（只估這些、忽略其餘、不重複計算）。
+- `src/components/MealLog.jsx`：source badge 四態（db/hybrid/ai/local）。
+- `src/App.css`：.ai-badge-db 樣式。
+
+### 對應 commit
+（本批，見 git log）食物分析混合架構
+
+### 測試指令與結果
+- `npm run build` → 通過。
+- preview 實測「白飯一碗、雞蛋兩顆、青菜」→ 純 DB 路徑，badge 📚 資料庫、高信心、
+  碳水51/蛋白20/脂肪11/415kcal（與 DB 完全吻合），零 AI 呼叫。
+- 長尾合併（hybrid）與純 AI 路徑需 Render（有 ANTHROPIC_API_KEY）實測。
+
+### 踩坑點
+- focus 模式務必在 prompt 強調「只計待估食物、不要包含已由 DB 計算的部分」，否則 AI 會
+  重複估整餐造成雙算。
+- 合併時 DB 小計（local.carbs 等）在 undetermined 時為 0，需用 dbMatched 旗標決定是否納入。
