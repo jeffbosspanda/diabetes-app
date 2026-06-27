@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Search, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { parseMealText, parseMealFoods } from '../utils/foodParser';
+import { analyzeFoodText } from '../utils/foodAiAnalysis';
 import { classifyGlycemicResponse, classifyFood } from '../utils/glycemicResponse';
 import ConfirmDialog from './ConfirmDialog';
 import { calcDietaryNeeds, analyzeDailyIntake, getDietaryTips, buildNutrientAdvice, mealNutrientFeedback, VEG_TYPES } from '../utils/dietaryAdvisor';
@@ -27,6 +28,7 @@ export default function MealLog() {
   const [editIndex, setEditIndex] = useState(null);
   const [form, setForm]           = useState(BLANK_FORM);
   const [analysis, setAnalysis]   = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const [inputMode, setInputMode] = useState('auto'); // 'auto' | 'manual'
   const [manual, setManual]       = useState(BLANK_MANUAL);
   const setM = (k, v) => setManual(m => ({ ...m, [k]: v }));
@@ -55,9 +57,17 @@ export default function MealLog() {
       .sort((a, b) => Math.abs(new Date(a.timestamp) - mealTime) - Math.abs(new Date(b.timestamp) - mealTime))[0] || null;
   }, [state.glucoseReadings, form.timestamp]);
 
-  const handleAnalyze = () => {
-    if (!form.foods.trim()) return;
+  const handleAnalyze = async () => {
+    if (!form.foods.trim() || analyzing) return;
+    setAnalyzing(true);
+    // Instant local result first, then upgrade with the AI result when it lands.
     setAnalysis(parseMealText(form.foods));
+    try {
+      const ai = await analyzeFoodText(form.foods);
+      if (ai) setAnalysis(ai);
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const handleFoodsChange = (v) => { set('foods', v); setAnalysis(null); };
@@ -110,7 +120,7 @@ export default function MealLog() {
     if (inputMode === 'auto' && analysis?.undetermined) { setInputMode('manual'); return; }
     const nutrition = inputMode === 'manual'
       ? { carbs: parseFloat(manual.carbs) || 0, protein: parseFloat(manual.protein) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, highGI: [], diabetesNotes: '', analysisConfidence: 'manual' }
-      : { carbs: analysis?.carbs ?? 0, protein: analysis?.protein ?? 0, fat: analysis?.fat ?? 0, calories: analysis?.calories ?? 0, highGI: analysis?.highGI ?? [], diabetesNotes: analysis?.diabetesNotes ?? '', analysisConfidence: analysis?.confidence };
+      : { carbs: analysis?.carbs ?? 0, protein: analysis?.protein ?? 0, fat: analysis?.fat ?? 0, calories: analysis?.calories ?? 0, fiber: analysis?.fiber ?? null, micros: analysis?.micros ?? [], highGI: analysis?.highGI ?? [], diabetesNotes: analysis?.diabetesNotes ?? '', analysisConfidence: analysis?.confidence, analysisSource: analysis?.source };
     const payload = {
       ...form,
       ...nutrition,
@@ -243,8 +253,10 @@ export default function MealLog() {
                   支援重量「200g／公克／克白飯」「半斤豬肉」「3兩牛肉」按比例換算（1 台斤＝600g、1 兩＝37.5g）；常用單位「一碗」「兩根」「3片」「一湯匙」；可直接寫碳水量「碳水50」或補糖「葡萄糖一包」。<b>無法判斷時會明確標示，請改用手動輸入。</b>
                 </div>
               </div>
-              <button className="btn-analyze" onClick={handleAnalyze} disabled={!form.foods.trim()}>
-                <Search size={14} /> 分析營養成分
+              <button className="btn-analyze" onClick={handleAnalyze} disabled={!form.foods.trim() || analyzing}>
+                {analyzing
+                  ? <><span className="btn-spinner" /> AI 分析中…</>
+                  : <><Zap size={14} /> AI 分析營養成分</>}
               </button>
             </>
           )}
@@ -294,6 +306,9 @@ export default function MealLog() {
               <div className="analysis-header">
                 <Zap size={14} color="var(--accent2)" />
                 <span>營養分析結果</span>
+                {analysis.source === 'ai'
+                  ? <span className="ai-badge">✨ AI</span>
+                  : <span className="ai-badge ai-badge-local">本地</span>}
                 <span className={`confidence-badge conf-${analysis.confidence}`}>
                   {analysis.confidence === 'high' ? '高信心'
                     : analysis.confidence === 'medium' ? '中信心'
@@ -355,6 +370,19 @@ export default function MealLog() {
                   <div className="nutrition-label">熱量</div>
                 </div>
               </div>
+              {(analysis.fiber != null || analysis.micros?.length > 0) && (
+                <div className="micros-section">
+                  {analysis.fiber != null && (
+                    <div className="micro-chip"><span className="micro-name">膳食纖維</span><span className="micro-amt">{analysis.fiber}g</span></div>
+                  )}
+                  {(analysis.micros || []).map((mi, i) => (
+                    <div key={i} className="micro-chip" title={mi.note || ''}>
+                      <span className="micro-name">{mi.name}</span>
+                      {mi.amount && <span className="micro-amt">{mi.amount}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               {analysis.highGI?.length > 0 && (
                 <div className="high-gi-section">
                   <div className="high-gi-title"><AlertTriangle size={13} /> 高GI食物警示</div>

@@ -468,6 +468,24 @@ textarea { resize: vertical; }
 .conf-partial { background: rgba(245,158,11,0.18); color: #9a6400; }
 .conf-undetermined { background: rgba(239,68,68,0.18); color: var(--red); }
 
+/* AI / local source badge in the analysis header */
+.ai-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
+  background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.18)); color: #6d28d9; }
+.ai-badge-local { background: rgba(148,163,184,0.2); color: var(--text-muted); }
+
+/* Inline spinner inside the analyze button */
+.btn-spinner { display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: spin 0.7s linear infinite; }
+
+/* Fiber + micronutrient chips */
+.micros-section { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.micro-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+  padding: 3px 8px; border-radius: 999px; background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.18); }
+.micro-name { color: var(--text); }
+.micro-amt { color: var(--accent2); font-weight: 600; }
+
 /* Undetermined-carb banner (cannot guess → push to manual) */
 .undetermined-banner { display: flex; gap: 8px; align-items: flex-start; background: rgba(239,68,68,0.1);
   border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 10px; margin-bottom: 10px; color: var(--red); font-size: 12.5px; }
