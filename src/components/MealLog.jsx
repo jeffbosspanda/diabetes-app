@@ -1,33 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X, Camera } from 'lucide-react';
+import { Utensils, Plus, AlertTriangle, CheckCircle, Zap, Pencil, Trash2, TrendingUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { parseMealText, parseMealFoods } from '../utils/foodParser';
-import { analyzeFoodText, analyzeFoodImage } from '../utils/foodAiAnalysis';
-
-// Shrink a photo to a max edge + JPEG quality so the base64 stays inline-small.
-function fileToCompressedDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const max = 1024;
-        let { width, height } = img;
-        if (width > height && width > max) { height = Math.round(height * max / width); width = max; }
-        else if (height >= width && height > max) { width = Math.round(width * max / height); height = max; }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
+import { analyzeFoodText } from '../utils/foodAiAnalysis';
 import { classifyGlycemicResponse, classifyFood } from '../utils/glycemicResponse';
 import ConfirmDialog from './ConfirmDialog';
 import { calcDietaryNeeds, analyzeDailyIntake, getDietaryTips, buildNutrientAdvice, mealNutrientFeedback, VEG_TYPES } from '../utils/dietaryAdvisor';
@@ -53,9 +29,6 @@ export default function MealLog() {
   const [form, setForm]           = useState(BLANK_FORM);
   const [analysis, setAnalysis]   = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [photoPreview, setPhotoPreview] = useState(null);
-  const [photoError, setPhotoError]     = useState(null);
-  const fileInputRef = useRef(null);
   const [inputMode, setInputMode] = useState('auto'); // 'auto' | 'manual'
   const [manual, setManual]       = useState(BLANK_MANUAL);
   const setM = (k, v) => setManual(m => ({ ...m, [k]: v }));
@@ -97,34 +70,12 @@ export default function MealLog() {
     }
   };
 
-  const handlePhoto = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-selecting the same file
-    if (!file || analyzing) return;
-    setAnalyzing(true);
-    setAnalysis(null);
-    setPhotoError(null);
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file);
-      setPhotoPreview(dataUrl);
-      const ai = await analyzeFoodImage(dataUrl);
-      if (ai.foods?.length && !form.foods.trim()) set('foods', ai.foods.join('、'));
-      setAnalysis(ai);
-    } catch (err) {
-      setPhotoError(err.message || '照片分析失敗');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
   const handleFoodsChange = (v) => { set('foods', v); setAnalysis(null); };
 
   const openAdd = () => {
     setEditIndex(null);
     setForm({ ...BLANK_FORM, timestamp: nowLocal() });
     setAnalysis(null);
-    setPhotoPreview(null);
-    setPhotoError(null);
     setInputMode('auto');
     setManual(BLANK_MANUAL);
     setShowForm(true);
@@ -302,29 +253,11 @@ export default function MealLog() {
                   支援重量「200g／公克／克白飯」「半斤豬肉」「3兩牛肉」按比例換算（1 台斤＝600g、1 兩＝37.5g）；常用單位「一碗」「兩根」「3片」「一湯匙」；可直接寫碳水量「碳水50」或補糖「葡萄糖一包」。<b>無法判斷時會明確標示，請改用手動輸入。</b>
                 </div>
               </div>
-              <div className="analyze-btn-row">
-                <button className="btn-analyze" onClick={handleAnalyze} disabled={!form.foods.trim() || analyzing}>
-                  {analyzing
-                    ? <><span className="btn-spinner" /> AI 分析中…</>
-                    : <><Zap size={14} /> AI 分析文字</>}
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
-                  style={{ display: 'none' }} onChange={handlePhoto} />
-                <button className="btn-analyze" onClick={() => fileInputRef.current?.click()} disabled={analyzing}>
-                  <Camera size={14} /> 拍照／上傳辨識
-                </button>
-              </div>
-              {photoPreview && (
-                <div className="photo-preview">
-                  <img src={photoPreview} alt="餐點照片" />
-                </div>
-              )}
-              {photoError && (
-                <div className="ai-error-banner">
-                  <AlertTriangle size={13} />
-                  <span>照片分析失敗（{photoError}）。請改用文字描述或手動輸入。</span>
-                </div>
-              )}
+              <button className="btn-analyze" onClick={handleAnalyze} disabled={!form.foods.trim() || analyzing}>
+                {analyzing
+                  ? <><span className="btn-spinner" /> AI 分析中…</>
+                  : <><Zap size={14} /> AI 分析營養成分</>}
+              </button>
             </>
           )}
 

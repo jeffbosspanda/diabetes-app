@@ -15,39 +15,6 @@ async function authHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// Analyze a meal PHOTO. `dataUrl` is a compressed JPEG data URL (the caller
-// shrinks the image client-side to keep the request inline). Throws on failure
-// (there's no local fallback for images — the caller surfaces the error).
-export async function analyzeFoodImage(dataUrl) {
-  const m = /^data:(image\/[a-zA-Z]+);base64,(.+)$/.exec(dataUrl || '');
-  if (!m) throw new Error('圖片格式錯誤');
-  const [, mediaType, imageBase64] = m;
-  const res = await fetch('/api/analyze-food', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-    body: JSON.stringify({ imageBase64, mediaType }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-  const ai = await res.json();
-  return {
-    foods: ai.foods || [],
-    carbs: ai.carbs ?? 0,
-    protein: ai.protein ?? 0,
-    fat: ai.fat ?? 0,
-    calories: ai.calories ?? 0,
-    fiber: ai.fiber ?? null,
-    highGI: ai.highGI || [],
-    micros: ai.micros || [],
-    diabetesNotes: ai.diabetesNotes || '',
-    confidence: ai.confidence || 'medium',
-    undetermined: false,
-    partial: false,
-    unmatched: [],
-    source: 'ai',
-  };
-}
-
 export async function analyzeFoodText(text) {
   if (!text?.trim()) return null;
 
