@@ -45,6 +45,8 @@ export async function analyzeFoodText(text) {
     };
   } catch (err) {
     console.warn('[FoodAI] AI 分析失敗，改用本地解析：', err.message);
-    return { ...parseMealText(text), source: 'local' };
+    // Surface the reason so the UI can show why it fell back (401 未登入 /
+    // 500 金鑰或模型錯誤 / timeout) instead of silently showing 本地.
+    return { ...parseMealText(text), source: 'local', aiError: err.message };
   }
 }

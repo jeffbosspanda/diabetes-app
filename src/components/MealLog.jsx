@@ -319,6 +319,13 @@ export default function MealLog() {
                 </span>
               </div>
 
+              {analysis.aiError && (
+                <div className="ai-error-banner">
+                  <AlertTriangle size={13} />
+                  <span>AI 分析失敗（{analysis.aiError}），已改用本地估算。</span>
+                </div>
+              )}
+
               {/* Carbs could not be determined at all → do not trust 0 g; push to manual */}
               {analysis.undetermined && (
                 <div className="undetermined-banner">
