@@ -23,7 +23,8 @@ export async function analyzeFoodText(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
       body: JSON.stringify({ text }), // no `foods` → AI estimates the whole meal
-      signal: AbortSignal.timeout(30000),
+      // NVIDIA 70B inference + Render free-tier cold start can exceed 30s.
+      signal: AbortSignal.timeout(60000),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const ai = await res.json();

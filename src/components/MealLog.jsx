@@ -60,8 +60,8 @@ export default function MealLog() {
   const handleAnalyze = async () => {
     if (!form.foods.trim() || analyzing) return;
     setAnalyzing(true);
-    // Instant local result first, then upgrade with the AI result when it lands.
-    setAnalysis(parseMealText(form.foods));
+    // Show only the spinner while analyzing — don't display any interim result.
+    setAnalysis(null);
     try {
       const ai = await analyzeFoodText(form.foods);
       if (ai) setAnalysis(ai);
