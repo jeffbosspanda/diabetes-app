@@ -613,31 +613,46 @@ app.post('/api/analyze-food-text', async (req, res) => {
   try {
     const anthropic = getAnthropicClient();
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      // Sonnet — markedly better numeric/nutrition estimation than Haiku, which
+      // produced wildly off gram values. Accuracy matters more than latency here.
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
       messages: [{
         role: 'user',
-        content: `你是糖尿病營養分析師。使用者輸入的餐點描述為：「${text}」
+        content: `你是專業糖尿病營養師。請估算這餐的營養。餐點描述：「${text}」
 
-請依台灣常見食物與份量估算營養，僅回傳以下 JSON（不要其他文字、不要 markdown 圍欄）：
+【務必逐項計算，不要直接猜總值】
+1. 先把描述拆成個別食物，標出每項的份量（公克）。未指定份量時用台灣常見「一份」份量。
+2. 對每一項，依「每100g 的營養」× 實際克數，算出該項的碳水、蛋白、脂肪。
+3. 最後加總，得到整餐總碳水、總蛋白、總脂肪。
+
+【常見台灣份量錨點（每份熟重與碳水，供校準，勿照抄）】
+- 白飯一碗≈200g/碳水53g；糙米飯一碗≈200g/碳水42g；稀飯一碗≈250g/碳水28g
+- 麵條一碗(熟)≈200g/碳水55g；水餃1顆≈25g/碳水9g(10顆≈90g碳水)
+- 吐司1片≈30g/碳水15g；饅頭1個≈80g/碳水38g；蛋餅一份≈碳水30g；抓餅一份≈碳水38g
+- 地瓜1條≈150g/碳水36g；玉米1根≈碳水30g
+- 雞蛋1顆≈碳水0.5g/蛋白7g/脂肪5g；雞胸肉一份150g≈蛋白35g/碳水0
+- 香蕉1根≈碳水27g；蘋果1顆≈碳水28g；珍珠奶茶中杯≈碳水60g
+- 葉菜類一份100g≈碳水4g；豆腐一塊150g≈碳水3g/蛋白8g
+
+【一致性自檢（重要）】熱量必須 ≈ 4×總碳水 + 4×總蛋白 + 9×總脂肪（誤差±10%）。若不符，回頭檢查各項克數是否離譜後再修正。
+
+僅回傳以下 JSON（不要其他文字、不要 markdown 圍欄、不要註解）：
 {
-  "foods": ["拆解後的食物名稱列表"],
-  "carbs": 數字(g, 總碳水),
-  "protein": 數字(g),
-  "fat": 數字(g),
-  "calories": 數字(kcal),
-  "fiber": 數字(g, 膳食纖維),
-  "highGI": [ { "name": "食物名", "gi": GI指數整數, "warning": "對血糖的影響與建議(30字內)" } ],
-  "micros": [ { "name": "營養素名(如 鈉/鉀/鈣/鐵/維生素C/Omega-3)", "amount": "概略量或'豐富/中等/少量'", "note": "簡短說明(20字內)" } ],
-  "diabetesNotes": "給糖尿病患者的整體飲食建議(100字內)",
+  "items": [ { "name": "食物名", "grams": 份量克數, "carbs": 該項碳水g, "protein": 該項蛋白g, "fat": 該項脂肪g } ],
+  "foods": ["食物名稱列表"],
+  "carbs": 總碳水g,
+  "protein": 總蛋白g,
+  "fat": 總脂肪g,
+  "calories": 總熱量kcal,
+  "fiber": 膳食纖維g,
+  "highGI": [ { "name": "食物名", "gi": GI整數, "warning": "對血糖影響與建議(30字內)" } ],
+  "micros": [ { "name": "營養素(鈉/鉀/鈣/鐵/維生素C/Omega-3等)", "amount": "概略量或豐富/中等/少量", "note": "簡短說明(20字內)" } ],
+  "diabetesNotes": "給糖尿病患者的整體建議(100字內)",
   "confidence": "high|medium|low"
 }
 
-規則：
-- 未指定份量時以「一份」常見份量估算。
-- GI > 70 才列入 highGI；精緻／油煎澱粉（如抓餅、蛋餅、白飯、饅頭）GI 偏高，勿低估。
-- micros 列出此餐較顯著的 2–5 種營養素即可。
-- 若完全無法判斷，confidence 設 "low" 並在 diabetesNotes 說明。`,
+規則：所有數字為阿拉伯數字（不要範圍、不要文字）。GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`,
       }],
     });
 
@@ -648,6 +663,12 @@ app.post('/api/analyze-food-text', async (req, res) => {
     // Normalize numeric fields so the UI never renders NaN.
     for (const k of ['carbs', 'protein', 'fat', 'calories', 'fiber']) {
       result[k] = Math.round(Number(result[k]) || 0);
+    }
+    // Calorie consistency guard — if the model's kcal is wildly off from the
+    // macro-derived value (4/4/9), recompute it so the card never shows nonsense.
+    const macroCal = 4 * result.carbs + 4 * result.protein + 9 * result.fat;
+    if (macroCal > 0 && (!result.calories || Math.abs(result.calories - macroCal) / macroCal > 0.25)) {
+      result.calories = Math.round(macroCal);
     }
     result.source = 'ai';
     res.json(result);
