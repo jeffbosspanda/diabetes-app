@@ -56,6 +56,38 @@ function getAnthropicClient() {
   return _anthropic;
 }
 
+// ── NVIDIA NIM (OpenAI-compatible) for food text analysis ──────────
+// The API key comes from build.nvidia.com (NOT Anthropic). NVIDIA hosts open
+// models behind an OpenAI-shaped /chat/completions endpoint. Reads NVIDIA_API_KEY,
+// falling back to ANTHROPIC_API_KEY so an already-set Render var keeps working.
+const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
+const NVIDIA_MODEL    = process.env.NVIDIA_MODEL || 'meta/llama-3.3-70b-instruct';
+function getNvidiaKey() {
+  const k = process.env.NVIDIA_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!k) throw new Error('未設定 NVIDIA_API_KEY（食物分析用）');
+  return k;
+}
+async function callNvidiaChat(prompt) {
+  const res = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getNvidiaKey()}` },
+    body: JSON.stringify({
+      model: NVIDIA_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 1500,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`NVIDIA ${res.status} ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('NVIDIA 回傳格式錯誤');
+  return text;
+}
+
 // Known working app versions (try newest first)
 const CLIENT_VERSION = '4.16.0';
 const PRODUCT = 'llu.android';
@@ -621,15 +653,7 @@ app.post('/api/analyze-food-text', async (req, res) => {
     : `請估算整餐的營養。餐點描述：「${text}」`;
 
   try {
-    const anthropic = getAnthropicClient();
-    const message = await anthropic.messages.create({
-      // Sonnet — markedly better numeric/nutrition estimation than Haiku, which
-      // produced wildly off gram values. Accuracy matters more than latency here.
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      messages: [{
-        role: 'user',
-        content: `你是專業糖尿病營養師。${target}
+    const prompt = `你是專業糖尿病營養師。${target}
 
 【務必逐項計算，不要直接猜總值】
 1. 把要估算的食物逐項列出，標出每項份量（公克）。未指定份量時用台灣常見「一份」份量。
@@ -662,11 +686,9 @@ app.post('/api/analyze-food-text', async (req, res) => {
   "confidence": "high|medium|low"
 }
 
-規則：所有數字為阿拉伯數字（不要範圍、不要文字）。${focusMode ? '上述各營養值只計「待估食物」，不要包含已由資料庫計算的部分。' : ''}GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`,
-      }],
-    });
+規則：所有數字為阿拉伯數字（不要範圍、不要文字）。${focusMode ? '上述各營養值只計「待估食物」，不要包含已由資料庫計算的部分。' : ''}GI>70 才列入 highGI，精緻/油煎澱粉(抓餅/蛋餅/白飯/饅頭/稀飯)GI偏高勿低估。完全無法判斷時 confidence 設 "low"。`;
 
-    const out = message.content[0].text.trim();
+    const out = (await callNvidiaChat(prompt)).trim();
     const jsonMatch = out.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('模型回傳格式錯誤');
     const result = JSON.parse(jsonMatch[0]);
